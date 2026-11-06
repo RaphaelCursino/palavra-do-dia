@@ -223,6 +223,13 @@ def mark_prayer_answered(connection, entry_id, owner_key):
     return cursor.rowcount == 1
 
 
+DEFAULT_READER_PREFERENCES = {
+    "theme": "light",
+    "font_scale": 100,
+    "verse_spacing": "comfortable",
+}
+
+
 def get_reader_preferences(connection, owner_key):
     row = connection.execute(
         """
@@ -231,11 +238,7 @@ def get_reader_preferences(connection, owner_key):
         """,
         (owner_key,),
     ).fetchone()
-    return dict(row) if row else {
-        "theme": "light",
-        "font_scale": 100,
-        "verse_spacing": "comfortable",
-    }
+    return dict(row) if row else dict(DEFAULT_READER_PREFERENCES)
 
 
 def save_reader_preferences(

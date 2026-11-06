@@ -308,3 +308,26 @@ def test_unhandled_error_returns_a_friendly_500(app, client):
     assert response.status_code == 500
     assert "Ocorreu um erro interno" in page
     assert "detalhe interno que não deve ser exposto" not in page
+
+
+def test_database_timeout_error_page_does_not_acquire_another_connection(
+    app, client, monkeypatch
+):
+    from psycopg_pool import PoolTimeout
+
+    @app.get("/_test/database-timeout")
+    def database_timeout():
+        raise PoolTimeout("connection unavailable")
+
+    monkeypatch.setattr(
+        "app.get_reader_preferences",
+        lambda *_args: pytest.fail(
+            "A página de erro não deve consultar preferências no banco."
+        ),
+    )
+
+    response = client.get("/_test/database-timeout")
+    page = response.get_data(as_text=True)
+
+    assert response.status_code == 500
+    assert "Ocorreu um erro interno" in page

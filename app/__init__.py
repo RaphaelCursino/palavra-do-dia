@@ -4,7 +4,7 @@ import secrets
 import sqlite3
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from flask import Flask
+from flask import Flask, g
 import psycopg
 
 from .commands import register_commands
@@ -17,7 +17,10 @@ from .db import (
 from .errors import register_error_handlers
 from .routes.pages import pages
 from .services.daily_reading import format_date_pt, local_today
-from .repositories.personal import get_reader_preferences
+from .repositories.personal import (
+    DEFAULT_READER_PREFERENCES,
+    get_reader_preferences,
+)
 from .identity import (
     csrf_token,
     ensure_visitor_identity,
@@ -103,14 +106,17 @@ def create_app(test_config=None):
     @app.context_processor
     def inject_current_date():
         today = local_today(app.config["DAILY_READING_TIMEZONE"])
+        reader_preferences = dict(DEFAULT_READER_PREFERENCES)
+        if not getattr(g, "skip_reader_preferences", False):
+            reader_preferences = get_reader_preferences(
+                get_db(), current_owner_key()
+            )
         return {
             "today_label": format_date_pt(today),
             "today_iso": today.isoformat(),
             "favorites_csrf_token": csrf_token("favorites"),
             "progress_csrf_token": csrf_token("progress"),
-            "reader_preferences": get_reader_preferences(
-                get_db(), current_owner_key()
-            ),
+            "reader_preferences": reader_preferences,
             "personal_csrf_token": csrf_token("personal"),
         }
 

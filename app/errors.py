@@ -1,4 +1,4 @@
-from flask import Flask, render_template
+from flask import Flask, g, render_template
 
 
 def register_error_handlers(app: Flask):
@@ -12,4 +12,5 @@ def register_error_handlers(app: Flask):
 
     @app.errorhandler(500)
     def internal_server_error(_error):
+        g.skip_reader_preferences = True
         return render_template("errors/500.html"), 500

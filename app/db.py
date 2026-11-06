@@ -10,6 +10,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 from flask import current_app, g
 import psycopg
+from psycopg_pool import PoolTimeout
 
 
 MIGRATIONS_PATH = Path(__file__).resolve().parent.parent / "migrations"
@@ -465,7 +466,20 @@ def connect_database():
             raise RuntimeError(
                 "O pool PostgreSQL não foi inicializado para este processo."
             )
-        return PostgresConnection(pool.getconn(), release=pool.putconn)
+        try:
+            connection = pool.getconn()
+        except PoolTimeout:
+            stats = pool.get_stats()
+            logger.error(
+                "PostgreSQL connection pool timed out "
+                "(pool_size=%d, max_size=%d, available=%d, waiting=%d)",
+                stats["pool_size"],
+                stats["pool_max"],
+                stats["pool_available"],
+                stats["requests_waiting"],
+            )
+            raise
+        return PostgresConnection(connection, release=pool.putconn)
 
     connection = sqlite3.connect(
         current_app.config["DATABASE_PATH"],

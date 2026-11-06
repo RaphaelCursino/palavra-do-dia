@@ -4,10 +4,16 @@ from types import SimpleNamespace
 from urllib.parse import urlencode
 
 import pytest
+from flask import Flask
 
 from app import create_app
-from app.db import _connect_postgres_connection, validate_neon_database_url
+from app.db import (
+    _connect_postgres_connection,
+    connect_database,
+    validate_neon_database_url,
+)
 from app.identity import csrf_token_for_visitor
+from psycopg_pool import PoolTimeout
 
 
 RUNTIME_URL = (
@@ -224,6 +230,63 @@ def test_postgres_production_startup_opens_lazy_pool_without_migrating(
     assert response.status_code == 200
     assert response.json == {"status": "ok"}
     assert pools[0].returned == [pools[0].connection]
+
+
+def test_postgres_pool_timeout_logs_capacity_without_connection_details(
+    caplog,
+):
+    import logging
+
+    timeout = PoolTimeout("sensitive connection details")
+
+    class FailingPool:
+        def getconn(self):
+            raise timeout
+
+        def get_stats(self):
+            return {
+                "pool_size": 4,
+                "pool_max": 4,
+                "pool_available": 0,
+                "requests_waiting": 2,
+            }
+
+    app = Flask(__name__)
+    app.config["DATABASE_URL"] = RUNTIME_URL
+    app.extensions["postgres_pool"] = FailingPool()
+    caplog.set_level(logging.ERROR, logger="app.db")
+
+    with app.app_context(), pytest.raises(PoolTimeout) as raised:
+        connect_database()
+
+    assert raised.value is timeout
+    assert (
+        "pool_size=4, max_size=4, available=0, waiting=2"
+        in caplog.text
+    )
+    assert "sensitive connection details" not in caplog.text
+    assert "ep-example" not in caplog.text
+
+
+def test_health_check_reports_not_ready_on_pool_timeout(
+    monkeypatch, tmp_path
+):
+    def timeout_connect():
+        raise PoolTimeout("connection unavailable")
+
+    monkeypatch.setattr("app.db.connect_database", timeout_connect)
+    app = create_app(
+        {
+            "TESTING": True,
+            "DATABASE_URL": None,
+            "DATABASE_PATH": str(tmp_path / "pool-timeout.sqlite3"),
+        }
+    )
+
+    response = app.test_client().get("/healthz")
+
+    assert response.status_code == 503
+    assert response.json == {"status": "not_ready"}
 
 
 def test_psycopg_pool_connection_warning_omits_exception_details(caplog):
