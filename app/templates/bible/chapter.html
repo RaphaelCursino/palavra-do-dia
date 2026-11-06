@@ -70,7 +70,7 @@
             </details>
           {% endif %}
           <form class="favorite-action bible-favorite-action" method="post" action="{{ url_for('pages.unfavorite', favorite_id=favorite_id) if favorite_id else url_for('pages.favorite_verse') }}">
-            <input type="hidden" name="csrf_token" value="{{ config['FAVORITES_CSRF_TOKEN'] }}">
+            <input type="hidden" name="csrf_token" value="{{ favorites_csrf_token }}">
             <input type="hidden" name="next" value="{{ request.full_path }}">
             {% if not favorite_id %}
               <input type="hidden" name="translation_code" value="{{ translation.code }}">

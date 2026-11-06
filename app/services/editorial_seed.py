@@ -3,6 +3,7 @@ from datetime import date
 from pathlib import Path
 
 from .blivre_import import BLIVRE_NAME
+from ..db import begin_transaction
 
 
 EDITORIAL_FIELDS = (
@@ -41,7 +42,7 @@ def publish_initial_editorial(connection, payload):
     days = _validate_payload(payload)
     owns_transaction = not connection.in_transaction
     if owns_transaction:
-        connection.execute("BEGIN IMMEDIATE")
+        begin_transaction(connection)
     else:
         connection.execute("SAVEPOINT publish_initial_editorial")
     succeeded = False
@@ -80,6 +81,7 @@ def publish_initial_editorial(connection, payload):
                         reading_date, translation_id, chapter_id,
                         start_verse_number, end_verse_number
                     ) VALUES (?, ?, ?, ?, ?)
+                    RETURNING id
                     """,
                     (
                         item["reading_date"],
@@ -89,7 +91,7 @@ def publish_initial_editorial(connection, payload):
                         item["end_verse_number"],
                     ),
                 )
-                reading_id = cursor.lastrowid
+                reading_id = cursor.fetchone()["id"]
                 inserted_readings += 1
 
             if not item["reflection_exists"]:

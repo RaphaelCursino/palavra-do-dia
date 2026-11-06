@@ -14,7 +14,7 @@ from flask import (
 )
 
 from ..db import get_db
-from ..identity import current_owner_key
+from ..identity import csrf_token, current_owner_key, validate_csrf_token
 from ..repositories.reflections import (
     count_published_reflections,
     get_published_reflection,
@@ -96,6 +96,7 @@ from ..services.personal import (
 
 pages = Blueprint("pages", __name__)
 REFLECTIONS_PER_PAGE = 10
+MAX_SEARCH_QUERY_LENGTH = 120
 FAVORITE_FILTERS = {
     "todos": None,
     "versiculos": "verse",
@@ -147,22 +148,19 @@ def _personal_notice(*query_keys):
 
 def _validate_favorite_post():
     token = request.form.get("csrf_token", "")
-    expected = current_app.config["FAVORITES_CSRF_TOKEN"]
-    if not token.isascii() or not secrets.compare_digest(token, expected):
+    if not validate_csrf_token("favorites", token):
         abort(400)
 
 
 def _validate_progress_post():
     token = request.form.get("csrf_token", "")
-    expected = current_app.config["PROGRESS_CSRF_TOKEN"]
-    if not token.isascii() or not secrets.compare_digest(token, expected):
+    if not validate_csrf_token("progress", token):
         abort(400)
 
 
 def _validate_personal_post():
     token = request.form.get("csrf_token", "")
-    expected = current_app.config["PERSONAL_CSRF_TOKEN"]
-    if not token.isascii() or not secrets.compare_digest(token, expected):
+    if not validate_csrf_token("personal", token):
         abort(400)
 
 
@@ -338,7 +336,7 @@ def home():
         reflection_favorited=reflection_favorite_id is not None,
         favorite_notice=_favorite_notice(),
         today_reading_completion=completion,
-        progress_csrf_token=current_app.config["PROGRESS_CSRF_TOKEN"],
+        progress_csrf_token=csrf_token("progress"),
     )
 
 
@@ -430,6 +428,8 @@ def bible_search():
         message = "Digite uma referência ou uma palavra para pesquisar."
     elif len(query) < 2:
         message = "Digite pelo menos 2 caracteres para pesquisar."
+    elif len(query) > MAX_SEARCH_QUERY_LENGTH:
+        message = "A busca deve ter no máximo 120 caracteres."
     else:
         reference_match = re.fullmatch(
             r"\s*(.+?)\s+([1-9][0-9]*)\s*[:ï¼š]\s*([1-9][0-9]*)\s*",
@@ -1210,7 +1210,7 @@ def progress_dashboard():
         ),
         monthly_total=len(completed_dates),
         progress_notice=_progress_notice(),
-        progress_csrf_token=current_app.config["PROGRESS_CSRF_TOKEN"],
+        progress_csrf_token=csrf_token("progress"),
         achievement_summary=[
             item for item in achievements if item["unlocked"]
         ][:3],

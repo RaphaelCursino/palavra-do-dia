@@ -4,19 +4,32 @@ import json
 import pytest
 
 from app import create_app
+from app.config import Config
 from app.db import get_db
 from app.services.scripture_import import import_translation
 
 
+@pytest.fixture(autouse=True)
+def isolate_sqlite_database_url(monkeypatch):
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.setattr(Config, "DATABASE_URL", None)
+
+
 @pytest.fixture
-def app(tmp_path):
+def sqlite_app(tmp_path):
     return create_app(
         {
             "TESTING": True,
             "PROPAGATE_EXCEPTIONS": False,
+            "DATABASE_URL": None,
             "DATABASE_PATH": str(tmp_path / "test.sqlite3"),
         }
     )
+
+
+@pytest.fixture
+def app(sqlite_app):
+    return sqlite_app
 
 
 @pytest.fixture
@@ -126,7 +139,7 @@ def daily_reading_factory(app, demo_payload, license_approval):
                 INSERT INTO daily_readings (
                     reading_date, translation_id, chapter_id,
                     start_verse_number, end_verse_number
-                ) VALUES (?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?                )
                 """,
                 (
                     reading_date,
@@ -170,7 +183,8 @@ def reflection_factory(app, daily_reading_factory):
                     daily_reading_id, title, reflection_text, simple_message,
                     practical_application, prayer_text, reflection_question,
                     author, status, published_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                )                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                RETURNING id
                 """,
                 (
                     reading["id"],
@@ -185,7 +199,8 @@ def reflection_factory(app, daily_reading_factory):
                     published_at,
                 ),
             )
+            reflection_id = cursor.fetchone()["id"]
             connection.commit()
-            return cursor.lastrowid
+            return reflection_id
 
     return add_reflection

@@ -7,6 +7,7 @@ from datetime import date
 from pathlib import Path
 from urllib.parse import urlparse
 
+import psycopg
 
 IMPORTER_VERSION = "1"
 TRANSLATION_CODE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
@@ -251,10 +252,11 @@ def import_translation(
                     license_url, license_scope, attribution_text,
                     license_reviewed_by, license_reviewed_at, license_evidence_url
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                RETURNING id
                 """,
                 tuple(translation.values()),
             )
-            translation_id = cursor.lastrowid
+            translation_id = cursor.fetchone()["id"]
             chapter_count = sum(len(chapters) for _, chapters in books)
             batch_cursor = connection.execute(
                 """
@@ -263,6 +265,7 @@ def import_translation(
                     source_sha256, importer_version, book_count, chapter_count,
                     verse_count
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                RETURNING id
                 """,
                 (
                     translation_id,
@@ -276,7 +279,7 @@ def import_translation(
                     verse_count,
                 ),
             )
-            batch_id = batch_cursor.lastrowid
+            batch_id = batch_cursor.fetchone()["id"]
 
             for book_code, chapters in books:
                 book_row = connection.execute(
@@ -337,7 +340,7 @@ def import_translation(
                         )
     except ScriptureImportError:
         raise
-    except sqlite3.IntegrityError as error:
+    except (sqlite3.IntegrityError, psycopg.IntegrityError) as error:
         raise ScriptureImportError(
             f"Importação cancelada por falha de integridade: {error}"
         ) from error

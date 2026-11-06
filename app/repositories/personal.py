@@ -1,4 +1,7 @@
 
+from ..db import current_timestamp_sql
+
+
 def get_annotation_for_verse(connection, verse_id, owner_key):
     return connection.execute(
         """
@@ -61,12 +64,12 @@ def list_annotations_for_chapter(
 
 def save_annotation(connection, verse_id, note_text, owner_key):
     connection.execute(
-        """
+        f"""
         INSERT INTO verse_annotations (owner_key, verse_id, note_text)
         VALUES (?, ?, ?)
         ON CONFLICT(owner_key, verse_id) DO UPDATE SET
             note_text = excluded.note_text,
-            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+            updated_at = {current_timestamp_sql(connection)}
         """,
         (owner_key, verse_id, note_text),
     )
@@ -110,13 +113,13 @@ def get_highlights_for_chapter(
 
 def save_highlight(connection, favorite_id, color, category):
     connection.execute(
-        """
+        f"""
         INSERT INTO verse_highlights (favorite_id, color, category)
         VALUES (?, ?, ?)
         ON CONFLICT(favorite_id) DO UPDATE SET
             color = excluded.color,
             category = excluded.category,
-            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+            updated_at = {current_timestamp_sql(connection)}
         """,
         (favorite_id, color, category),
     )
@@ -177,18 +180,19 @@ def create_prayer_entry(connection, entry_type, title, description, owner_key):
         """
         INSERT INTO prayer_entries (owner_key, entry_type, title, description)
         VALUES (?, ?, ?, ?)
+        RETURNING id
         """,
         (owner_key, entry_type, title, description),
     )
-    return cursor.lastrowid
+    return cursor.fetchone()["id"]
 
 
 def update_prayer_entry(connection, entry_id, entry_type, title, description, owner_key):
     cursor = connection.execute(
-        """
+        f"""
         UPDATE prayer_entries
         SET entry_type = ?, title = ?, description = ?,
-            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+            updated_at = {current_timestamp_sql(connection)}
         WHERE id = ? AND owner_key = ? AND status = 'active'
         """,
         (entry_type, title, description, entry_id, owner_key),
@@ -206,11 +210,11 @@ def delete_prayer_entry(connection, entry_id, owner_key):
 
 def mark_prayer_answered(connection, entry_id, owner_key):
     cursor = connection.execute(
-        """
+        f"""
         UPDATE prayer_entries
         SET status = 'answered',
-            answered_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
-            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+            answered_at = {current_timestamp_sql(connection)},
+            updated_at = {current_timestamp_sql(connection)}
         WHERE id = ? AND owner_key = ?
           AND entry_type = 'request' AND status = 'active'
         """,
@@ -238,14 +242,14 @@ def save_reader_preferences(
     connection, theme, font_scale, verse_spacing, owner_key
 ):
     connection.execute(
-        """
+        f"""
         INSERT INTO reader_preferences (owner_key, theme, font_scale, verse_spacing)
         VALUES (?, ?, ?, ?)
         ON CONFLICT(owner_key) DO UPDATE SET
             theme = excluded.theme,
             font_scale = excluded.font_scale,
             verse_spacing = excluded.verse_spacing,
-            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+            updated_at = {current_timestamp_sql(connection)}
         """,
         (owner_key, theme, font_scale, verse_spacing),
     )

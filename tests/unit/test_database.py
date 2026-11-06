@@ -1,15 +1,396 @@
 from contextlib import closing
+from datetime import date, datetime, timedelta, timezone
 import hashlib
 import json
+import re
 import sqlite3
 from pathlib import Path
 import shutil
 
 import pytest
+from flask import Flask
 
 from app import create_app
-from app.db import MIGRATIONS_PATH, apply_migrations, get_db
+from app.db import (
+    MIGRATIONS_PATH,
+    POSTGRES_MIGRATIONS_PATH,
+    DatabaseRow,
+    _adapt_postgres_query,
+    _replace_sqlite_placeholders,
+    apply_migrations,
+    apply_postgres_migrations,
+    begin_transaction,
+    connect_database,
+    get_database_backend,
+    get_db,
+    is_integrity_error,
+    PostgresConnection,
+    postgres_row_factory,
+)
 from app.services.scripture_import import import_translation
+from scripts.postgres_test_guard import PostgresTestSafetyError
+
+
+def test_database_backend_defaults_to_sqlite_without_database_url():
+    assert get_database_backend({"DATABASE_URL": None}) == "sqlite"
+    assert get_database_backend({}) == "sqlite"
+
+
+def test_database_backend_selects_postgresql_from_database_url():
+    assert (
+        get_database_backend(
+            {"DATABASE_URL": "postgresql://example.invalid/database"}
+        )
+        == "postgresql"
+    )
+
+
+def test_postgres_test_mode_fails_closed_instead_of_falling_back_to_sqlite(
+    tmp_path,
+):
+    database_path = tmp_path / "must-not-be-created.sqlite3"
+    app = Flask(__name__)
+    app.config.update(
+        POSTGRES_TEST_MODE=True,
+        DATABASE_URL=None,
+        DATABASE_PATH=str(database_path),
+    )
+
+    with app.app_context(), pytest.raises(PostgresTestSafetyError) as error:
+        connect_database()
+
+    assert error.value.diagnostic_code == "POSTGRES_TEST_DATABASE_URL_REQUIRED"
+    assert not database_path.exists()
+
+
+def test_postgres_test_mode_connects_only_through_the_guard(monkeypatch):
+    import scripts.postgres_test_guard as guard
+
+    raw_connection = object()
+    calls = []
+
+    def guarded_connect(database_url, row_factory=None):
+        calls.append((database_url, row_factory))
+        return raw_connection
+
+    monkeypatch.setattr(guard, "connect_postgres_test_database", guarded_connect)
+    app = Flask(__name__)
+    app.config.update(
+        POSTGRES_TEST_MODE=True,
+        DATABASE_URL="postgresql://test_role@127.0.0.1:5432/palavra_dia_pytest",
+    )
+
+    with app.app_context():
+        connection = connect_database()
+
+    assert isinstance(connection, PostgresConnection)
+    assert connection._connection is raw_connection
+    assert calls == [
+        (
+            app.config["DATABASE_URL"],
+            postgres_row_factory,
+        )
+    ]
+
+
+def test_default_sqlite_test_app_ignores_database_url(app):
+    assert app.config["DATABASE_URL"] is None
+    assert get_database_backend(app.config) == "sqlite"
+
+
+def test_postgresql_adapter_preserves_query_and_row_compatibility():
+    assert _replace_sqlite_placeholders(
+        "SELECT * FROM verses WHERE id = ? AND code = ?"
+    ) == "SELECT * FROM verses WHERE id = %s AND code = %s"
+    row = DatabaseRow({"id": 7, "code": "GEN"})
+    assert row["id"] == 7
+    assert row[0] == 7
+    assert row[1] == "GEN"
+
+
+def test_postgresql_sql_adaptation_preserves_literals_and_comments():
+    query = (
+        "SELECT '?' AS literal, value = ? -- ?\n"
+        "/* ? */ WHERE note = 'LIKE ? COLLATE NOCASE'"
+    )
+
+    assert _replace_sqlite_placeholders(query) == (
+        "SELECT '?' AS literal, value = %s -- ?\n"
+        "/* ? */ WHERE note = 'LIKE ? COLLATE NOCASE'"
+    )
+    assert _adapt_postgres_query(
+        "SELECT text FROM verses WHERE text LIKE ? COLLATE NOCASE"
+    ) == "SELECT text FROM verses WHERE text ILIKE %s"
+    assert _adapt_postgres_query(
+        "SELECT 'LIKE ? COLLATE NOCASE' AS literal, text = ?"
+    ) == "SELECT 'LIKE ? COLLATE NOCASE' AS literal, text = %s"
+
+
+def test_postgresql_rows_normalize_temporal_values_to_iso_strings():
+    class Column:
+        def __init__(self, name):
+            self.name = name
+
+    class Cursor:
+        description = [
+            Column("reading_date"),
+            Column("created_at"),
+            Column("plain_timestamp"),
+        ]
+
+    make_row = postgres_row_factory(Cursor())
+    row = make_row(
+        (
+            date(2026, 6, 15),
+            datetime(
+                2026,
+                6,
+                15,
+                3,
+                30,
+                tzinfo=timezone(timedelta(hours=3)),
+            ),
+            datetime(2026, 6, 15, 3, 30),
+        )
+    )
+
+    assert row["reading_date"] == "2026-06-15"
+    assert row["created_at"] == "2026-06-15T00:30:00Z"
+    assert row["plain_timestamp"] == "2026-06-15T03:30:00"
+
+
+def test_postgresql_row_factory_handles_select_results_and_empty_selects():
+    class Column:
+        def __init__(self, name):
+            self.name = name
+
+    class Cursor:
+        description = [Column("id"), Column("code")]
+
+    make_row = postgres_row_factory(Cursor())
+
+    assert make_row((7, "GEN")) == {"id": 7, "code": "GEN"}
+    assert list(map(make_row, ())) == []
+
+
+def test_postgresql_row_factory_handles_dml_without_returning():
+    class Cursor:
+        description = None
+
+    make_row = postgres_row_factory(Cursor())
+
+    assert make_row(()) == {}
+
+
+def test_postgresql_row_factory_handles_dml_returning_rows():
+    class Column:
+        def __init__(self, name):
+            self.name = name
+
+    class Cursor:
+        description = [Column("id")]
+
+    make_row = postgres_row_factory(Cursor())
+
+    assert make_row((12,)) == {"id": 12}
+
+
+def test_sqlite_select_and_dml_keep_cursor_result_behavior():
+    connection = sqlite3.connect(":memory:")
+    connection.execute("CREATE TABLE entries (id INTEGER PRIMARY KEY, value TEXT)")
+
+    insert_without_returning = connection.execute(
+        "INSERT INTO entries (value) VALUES (?)",
+        ("first",),
+    )
+    insert_with_returning = connection.execute(
+        "INSERT INTO entries (value) VALUES (?) RETURNING id",
+        ("second",),
+    )
+    update_without_returning = connection.execute(
+        "UPDATE entries SET value = ? WHERE id = ?",
+        ("updated", 1),
+    )
+    update_with_returning = connection.execute(
+        "UPDATE entries SET value = ? WHERE id = ? RETURNING id",
+        ("updated again", 2),
+    )
+    select_with_result = connection.execute(
+        "SELECT id, value FROM entries WHERE value = ?",
+        ("updated",),
+    )
+    select_without_result = connection.execute(
+        "SELECT id, value FROM entries WHERE value = ?",
+        ("missing",),
+    )
+
+    assert insert_without_returning.description is None
+    assert insert_with_returning.fetchone() == (2,)
+    assert update_without_returning.description is None
+    assert update_with_returning.fetchone() == (2,)
+    assert select_with_result.fetchone() == (1, "updated")
+    assert select_without_result.fetchone() is None
+    connection.close()
+
+
+def test_postgresql_adapter_executemany_uses_and_closes_cursor():
+    class FakeCursor:
+        def __init__(self, events):
+            self.events = events
+
+        def __enter__(self):
+            self.events.append("cursor_enter")
+            return self
+
+        def __exit__(self, exception_type, exception, traceback):
+            self.events.append(("cursor_exit", exception_type))
+
+        def executemany(self, query, parameters):
+            self.events.append(("executemany", query, parameters))
+
+    class FakeConnection:
+        def __init__(self):
+            self.events = []
+
+        def cursor(self):
+            self.events.append("cursor")
+            return FakeCursor(self.events)
+
+        def commit(self):
+            self.events.append("commit")
+
+        def rollback(self):
+            self.events.append("rollback")
+
+    raw = FakeConnection()
+    result = PostgresConnection(raw).executemany(
+        "INSERT INTO books (code) VALUES (?)",
+        [("GEN",), ("EXO",)],
+    )
+
+    assert result is None
+    assert raw.events == [
+        "cursor",
+        "cursor_enter",
+        ("executemany", "INSERT INTO books (code) VALUES (%s)", [("GEN",), ("EXO",)]),
+        ("cursor_exit", None),
+    ]
+
+
+def test_postgresql_adapter_executemany_closes_cursor_and_propagates_errors():
+    failure = RuntimeError("insert failed")
+
+    class FakeCursor:
+        def __init__(self, events):
+            self.events = events
+
+        def __enter__(self):
+            self.events.append("cursor_enter")
+            return self
+
+        def __exit__(self, exception_type, exception, traceback):
+            self.events.append(("cursor_exit", exception_type))
+
+        def executemany(self, query, parameters):
+            self.events.append(("executemany", query, parameters))
+            raise failure
+
+    class FakeConnection:
+        def __init__(self):
+            self.events = []
+
+        def cursor(self):
+            self.events.append("cursor")
+            return FakeCursor(self.events)
+
+        def commit(self):
+            self.events.append("commit")
+
+        def rollback(self):
+            self.events.append("rollback")
+
+    raw = FakeConnection()
+    with pytest.raises(RuntimeError, match="insert failed"):
+        PostgresConnection(raw).executemany(
+            "INSERT INTO books (code) VALUES (?)",
+            [("GEN",)],
+        )
+
+    assert raw.events == [
+        "cursor",
+        "cursor_enter",
+        ("executemany", "INSERT INTO books (code) VALUES (%s)", [("GEN",)]),
+        ("cursor_exit", RuntimeError),
+    ]
+
+
+def test_postgresql_adapter_context_manager_delegates_commit_and_rollback():
+    class FakeConnection:
+        def __init__(self):
+            self.events = []
+
+        def __enter__(self):
+            self.events.append("enter")
+            return self
+
+        def __exit__(self, exception_type, exception, traceback):
+            self.events.append(("exit", exception_type))
+            return False
+
+        def commit(self):
+            self.events.append("commit")
+
+        def rollback(self):
+            self.events.append("rollback")
+
+        def close(self):
+            self.events.append("close")
+
+    raw = FakeConnection()
+    with PostgresConnection(raw) as wrapped:
+        wrapped.commit()
+    assert raw.events == ["enter", "commit", ("exit", None)]
+
+    raw = FakeConnection()
+    try:
+        with PostgresConnection(raw):
+            raise ValueError("rollback test")
+    except ValueError:
+        pass
+    assert raw.events == ["enter", ("exit", ValueError)]
+
+
+def test_transaction_and_integrity_helpers_support_sqlite_and_postgres_shapes():
+    connection = sqlite3.connect(":memory:")
+    begin_transaction(connection)
+    connection.rollback()
+    assert is_integrity_error(sqlite3.IntegrityError("duplicate"))
+
+    class FakePostgresConnection:
+        def __init__(self):
+            self.statement = None
+
+        def execute(self, statement):
+            self.statement = statement
+
+    postgres_connection = FakePostgresConnection()
+    begin_transaction(postgres_connection)
+    assert postgres_connection.statement == "BEGIN"
+
+
+def test_sqlite_savepoint_rolls_back_only_nested_changes():
+    connection = sqlite3.connect(":memory:")
+    connection.execute("CREATE TABLE values_table (value INTEGER)")
+    connection.execute("BEGIN")
+    connection.execute("INSERT INTO values_table VALUES (1)")
+    connection.execute("SAVEPOINT nested")
+    connection.execute("INSERT INTO values_table VALUES (2)")
+    connection.execute("ROLLBACK TO SAVEPOINT nested")
+    connection.execute("RELEASE SAVEPOINT nested")
+    connection.commit()
+    assert connection.execute(
+        "SELECT value FROM values_table ORDER BY value"
+    ).fetchall() == [(1,)]
 
 
 def test_app_initializes_scripture_schema_without_translation_content(app):
@@ -62,6 +443,142 @@ def test_schema_migrations_are_idempotent(app):
         ).fetchone()[0] == 8
 
 
+def test_postgresql_migrations_define_schema_without_seed_data():
+        migration_text = "\n".join(
+            migration.read_text(encoding="utf-8")
+            for migration in sorted(POSTGRES_MIGRATIONS_PATH.glob("*.sql"))
+        )
+        expected_tables = {
+            "translations",
+            "books",
+            "chapters",
+            "import_batches",
+            "verses",
+            "daily_readings",
+            "reflections",
+            "favorites",
+            "reading_completions",
+            "reading_goals",
+            "verse_notes",
+            "verse_annotations",
+            "verse_highlights",
+            "prayer_entries",
+            "reader_preferences",
+            "achievement_unlocks",
+            "weekly_goal_achievements",
+        }
+        declared_tables = set(
+            re.findall(r"CREATE TABLE (?:IF NOT EXISTS )?([a-z_]+)", migration_text)
+        )
+        assert expected_tables <= declared_tables
+        assert not re.search(r"(?im)^\s*INSERT\s+INTO\s+", migration_text)
+        assert "GENERATED BY DEFAULT AS IDENTITY" in migration_text
+        assert "TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP" in migration_text
+        assert "DATE NOT NULL" in migration_text
+        assert re.search(
+            r"favorite_id BIGINT PRIMARY KEY\s+REFERENCES favorites\(id\)",
+            migration_text,
+        )
+        assert not re.search(
+            r"favorite_id BIGINT GENERATED BY DEFAULT AS IDENTITY",
+            migration_text,
+        )
+        assert re.search(r"source_sha256 TEXT NOT NULL", migration_text)
+        assert "REFERENCES verses" in migration_text
+        assert "PRIMARY KEY (owner_key, achievement_code)" in migration_text
+        assert "CREATE INDEX idx_favorites_owner_created" in migration_text
+
+
+def test_postgresql_migrations_do_not_apply_text_functions_to_temporal_columns():
+        migration_text = "\n".join(
+            migration.read_text(encoding="utf-8")
+            for migration in sorted(POSTGRES_MIGRATIONS_PATH.glob("*.sql"))
+        )
+        temporal_columns = re.findall(
+            r"(?im)^\s*(\w+)\s+(?:DATE|TIMESTAMPTZ)\b",
+            migration_text,
+        )
+
+        for column in temporal_columns:
+            assert not re.search(
+                rf"\b(?:trim|length|lower|upper)\s*\(\s*{column}\b",
+                migration_text,
+                re.IGNORECASE,
+            ), f"text function applied to temporal column {column}"
+
+        assert re.search(
+            r"\(status\s*=\s*'published'\s+AND\s+published_at\s+IS\s+NOT\s+NULL\)",
+            migration_text,
+            re.IGNORECASE,
+        )
+
+
+class _FakePostgresResult:
+        def __init__(self, value=None):
+            self.value = value
+
+        def fetchone(self):
+            return self.value
+
+
+class _FakePostgresMigrationConnection:
+        def __init__(self, fail_on_script=False):
+            self.applied = set()
+            self.events = []
+            self.fail_on_script = fail_on_script
+
+        def execute(self, query, parameters=()):
+            self.events.append(("execute", query, parameters))
+            if query.startswith("SELECT 1"):
+                return _FakePostgresResult(
+                    (1,) if parameters[0] in self.applied else None
+                )
+            if query.startswith("INSERT INTO schema_migrations"):
+                self.applied.add(parameters[0])
+            if self.fail_on_script and query.startswith("CREATE TABLE"):
+                raise RuntimeError("simulated migration failure")
+            return _FakePostgresResult()
+
+        def commit(self):
+            self.events.append(("commit",))
+
+        def rollback(self):
+            self.events.append(("rollback",))
+
+
+def test_postgresql_migration_runner_is_idempotent(tmp_path):
+        migrations = tmp_path / "postgresql"
+        migrations.mkdir()
+        (migrations / "001_first.sql").write_text(
+            "CREATE TABLE first_table (id BIGINT PRIMARY KEY);",
+            encoding="utf-8",
+        )
+        connection = _FakePostgresMigrationConnection()
+
+        apply_postgres_migrations(connection, migrations)
+        apply_postgres_migrations(connection, migrations)
+
+        assert connection.applied == {1}
+        assert sum(event == ("commit",) for event in connection.events) == 3
+        assert not any(event == ("rollback",) for event in connection.events)
+
+
+def test_postgresql_migration_runner_rolls_back_failed_migration(tmp_path):
+        migrations = tmp_path / "postgresql"
+        migrations.mkdir()
+        (migrations / "001_broken.sql").write_text(
+            "CREATE TABLE broken_table (id BIGINT PRIMARY KEY);",
+            encoding="utf-8",
+        )
+        connection = _FakePostgresMigrationConnection(fail_on_script=True)
+
+        with pytest.raises(RuntimeError, match="simulated migration failure"):
+            apply_postgres_migrations(connection, migrations)
+
+        assert ("rollback",) in connection.events
+        assert connection.applied == set()
+
+
 def test_favorites_migration_preserves_existing_scripture_and_reflection_data(
     tmp_path, demo_payload, license_approval
 ):
@@ -103,12 +620,13 @@ def test_favorites_migration_preserves_existing_scripture_and_reflection_data(
                 reading_date, translation_id, chapter_id,
                 start_verse_number, end_verse_number
             ) VALUES ('2026-06-15', ?, ?, 1, 2)
+            RETURNING id
             """,
             (
                 reading_location["translation_id"],
                 reading_location["chapter_id"],
             ),
-        ).lastrowid
+        ).fetchone()["id"]
         connection.execute(
             """
             INSERT INTO reflections (

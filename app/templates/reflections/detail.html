@@ -61,7 +61,7 @@
       <span>Por {{ reflection.author }}</span>
       <div class="reflection-actions">
         <form class="favorite-action" method="post" action="{{ url_for('pages.unfavorite', favorite_id=reflection_favorite_id) if reflection_favorited else url_for('pages.favorite_reflection') }}">
-          <input type="hidden" name="csrf_token" value="{{ config['FAVORITES_CSRF_TOKEN'] }}">
+          <input type="hidden" name="csrf_token" value="{{ favorites_csrf_token }}">
           <input type="hidden" name="next" value="{{ request.full_path }}">
           {% if not reflection_favorited %}
             <input type="hidden" name="reflection_id" value="{{ reflection.id }}">

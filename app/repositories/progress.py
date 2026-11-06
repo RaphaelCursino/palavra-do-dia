@@ -1,3 +1,4 @@
+from ..db import current_timestamp_sql
 from .scripture import get_daily_reading
 
 
@@ -124,13 +125,12 @@ def get_weekly_goal(connection, owner_key):
 
 def save_weekly_goal(connection, weekly_target, owner_key):
     connection.execute(
-        """
+        f"""
         INSERT INTO reading_goals (owner_key, weekly_target)
         VALUES (?, ?)
         ON CONFLICT(owner_key) DO UPDATE SET
             weekly_target = excluded.weekly_target,
-            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+            updated_at = {current_timestamp_sql(connection)}
         """,
         (owner_key, weekly_target),
     )
-

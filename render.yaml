@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: palavra-do-dia
+    runtime: python
+    plan: free
+    autoDeploy: false
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn --bind 0.0.0.0:$PORT --workers 2 --threads 4 --timeout 120 wsgi:application
+    healthCheckPath: /healthz
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.13.4
+      - key: PALAVRA_DO_DIA_ENV
+        value: production
+      - key: PALAVRA_DO_DIA_TIMEZONE
+        value: America/Sao_Paulo
+      - key: PALAVRA_DO_DIA_DB_POOL_MAX_SIZE
+        value: "4"
+      - key: PALAVRA_DO_DIA_SECRET_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        sync: false
