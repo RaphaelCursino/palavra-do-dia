@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+
+{% block title %}Buscar na Bíblia — Palavra do Dia{% endblock %}
+
+{% block content %}
+  <nav class="bible-breadcrumbs" aria-label="Caminho da página">
+    <a href="{{ url_for('pages.bible_index', translation=selected_translation.code if selected_translation else None) }}">Bíblia Sagrada</a>
+    <span aria-hidden="true">/</span>
+    <span>Busca bíblica</span>
+  </nav>
+
+  <section class="bible-reader-hero bible-search-hero" aria-labelledby="page-title">
+    <p class="bible-eyebrow"><span aria-hidden="true">✦</span> Encontre uma passagem</p>
+    <h1 id="page-title">Busca <span>bíblica</span></h1>
+    <p>Pesquise uma referência ou uma palavra nos versículos autorizados da BLIVRE.</p>
+  </section>
+
+  <section class="bible-library-panel bible-search-panel" aria-label="Busca bíblica">
+    <form class="bible-search-form" method="get" action="{{ url_for('pages.bible_search') }}">
+      <label for="bible-search-query">Referência ou palavra</label>
+      <div class="bible-search-form-row">
+        <input id="bible-search-query" name="q" type="search" value="{{ search_query }}" placeholder="Ex.: João 3:16 ou esperança" required minlength="2" autofocus>
+        <select name="translation" aria-label="Tradução">
+          {% for item in translations %}
+            <option value="{{ item.code }}"{% if selected_translation and selected_translation.code == item.code %} selected{% endif %}>{{ item.name }}</option>
+          {% endfor %}
+        </select>
+        <button class="select-submit" type="submit">Pesquisar</button>
+      </div>
+      <p class="bible-search-help">A busca usa somente o texto existente no banco da tradução selecionada.</p>
+    </form>
+
+    {% if search_message %}
+      <p class="bible-search-message" role="status">{{ search_message }}</p>
+    {% endif %}
+
+    {% if search_results %}
+      <div class="bible-search-results" aria-live="polite">
+        <div class="bible-library-heading">
+          <p class="bible-section-kicker">Resultados encontrados</p>
+          <h2>{{ search_results|length }} {{ "resultado" if search_results|length == 1 else "resultados" }}</h2>
+        </div>
+        <ol class="bible-search-result-list">
+          {% for result in search_results %}
+            <li class="bible-search-result">
+              <a href="{{ url_for('pages.bible_chapter', translation_code=result.translation_code, book_code=result.book_code, chapter_number=result.chapter_number) }}#verse-{{ result.verse_number }}">
+                <strong>{{ result.book_name }} {{ result.chapter_number }}:{{ result.verse_number }}</strong>
+                <span>{{ result.text }}</span>
+                <small>Abrir versículo →</small>
+              </a>
+            </li>
+          {% endfor %}
+        </ol>
+      </div>
+    {% endif %}
+  </section>
+{% endblock %}

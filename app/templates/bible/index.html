@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+
+{% block title %}Bíblia Sagrada — Palavra do Dia{% endblock %}
+
+{% block content %}
+  <section class="bible-library-hero" aria-labelledby="page-title">
+    <div class="bible-hero-art" aria-hidden="true">
+      <svg viewBox="0 0 120 120" fill="none">
+        <path d="M60 18v82M22 30c13-5 25-2 38 7v63c-13-9-25-12-38-7V30Zm76 0c-13-5-25-2-38 7v63c13-9 25-12 38-7V30Z" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/>
+        <path d="M48 51h-14m14 13H34m52-13H72m14 13H72" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+        <path d="m60 9 2.5 5.5L68 17l-5.5 2.5L60 25l-2.5-5.5L52 17l5.5-2.5L60 9Z" fill="currentColor"/>
+      </svg>
+    </div>
+    <div class="bible-hero-copy">
+      <p class="bible-eyebrow"><span aria-hidden="true">✦</span> Um lugar de encontro com a Palavra</p>
+      <h1 id="page-title">Bíblia <span>Sagrada</span></h1>
+      <p>Encontre um livro, escolha um capítulo e leia no seu ritmo.</p>
+    </div>
+    {% if selected_translation %}
+      <div class="bible-edition-badge">
+        <span class="bible-edition-mark" aria-hidden="true">✧</span>
+        <span><small>Tradução disponível</small><strong>{{ selected_translation.name }}</strong></span>
+      </div>
+    {% endif %}
+  </section>
+
+  {% if translations %}
+    <section class="bible-library-panel" aria-label="Biblioteca bíblica">
+      {% if selected_translation %}
+        <div class="bible-library-toolbar">
+          <div class="bible-library-heading">
+            <p class="bible-section-kicker">Explore as Escrituras</p>
+            <h2>Escolha um livro</h2>
+          </div>
+          <form class="translation-form bible-translation-form" method="get" action="{{ url_for('pages.bible_index') }}">
+            <label for="bible-translation">Tradução</label>
+            <div class="select-row">
+              <select id="bible-translation" name="translation" required>
+                {% for translation in translations %}
+                  <option value="{{ translation.code }}"{% if selected_translation.code == translation.code %} selected{% endif %}>
+                    {{ translation.name }}
+                  </option>
+                {% endfor %}
+              </select>
+              <button class="select-submit" type="submit">Abrir</button>
+            </div>
+          </form>
+        </div>
+
+        <div class="bible-search-wrap">
+          <label for="bible-book-search">Buscar livro pelo nome</label>
+          <div class="bible-search-field">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8" stroke="currentColor" stroke-width="1.7"/><path d="m16 16 4.2 4.2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+            <input id="bible-book-search" type="search" placeholder="Ex.: Salmos, João, Gênesis" autocomplete="off" data-bible-book-search>
+            <kbd>/</kbd>
+          </div>
+          <p class="bible-search-feedback" data-bible-search-feedback aria-live="polite">{{ books|length }} livros disponíveis</p>
+        </div>
+        <form class="bible-search-form bible-inline-search-form" method="get" action="{{ url_for('pages.bible_search') }}">
+          <label for="bible-verse-search">Buscar na Bíblia</label>
+          <div class="bible-search-form-row">
+            <input id="bible-verse-search" name="q" type="search" placeholder="João 3:16 ou uma palavra" minlength="2" required>
+            <input type="hidden" name="translation" value="{{ selected_translation.code }}">
+            <button class="select-submit" type="submit">Pesquisar versículos</button>
+          </div>
+          <p class="bible-search-help">Pesquise referências ou trechos da BLIVRE.</p>
+        </form>
+
+        <div class="bible-testament-section" data-testament-section="OT">
+          <div class="bible-testament-heading">
+            <span class="bible-testament-number">01</span>
+            <div><p>Os primeiros escritos</p><h3>Antigo Testamento</h3></div>
+            <span class="bible-testament-count">{{ books|selectattr('testament', 'equalto', 'OT')|list|length }} livros</span>
+          </div>
+          <div class="bible-book-grid" aria-label="Livros do Antigo Testamento">
+            {% for book in books if book.testament == "OT" %}
+              <a class="bible-book-card" data-bible-book data-book-name="{{ book.name_pt|lower }}" href="{{ url_for('pages.bible_book', translation_code=selected_translation.code, book_code=book.code) }}">
+                <span class="bible-book-order">{{ "%02d"|format(book.canonical_order) }}</span>
+                <span class="bible-book-name">{{ book.name_pt }}</span>
+                <span class="bible-book-arrow" aria-hidden="true">↗</span>
+              </a>
+            {% endfor %}
+          </div>
+        </div>
+
+        <div class="bible-testament-section" data-testament-section="NT">
+          <div class="bible-testament-heading">
+            <span class="bible-testament-number">02</span>
+            <div><p>Os escritos da nova aliança</p><h3>Novo Testamento</h3></div>
+            <span class="bible-testament-count">{{ books|selectattr('testament', 'equalto', 'NT')|list|length }} livros</span>
+          </div>
+          <div class="bible-book-grid" aria-label="Livros do Novo Testamento">
+            {% for book in books if book.testament == "NT" %}
+              <a class="bible-book-card" data-bible-book data-book-name="{{ book.name_pt|lower }}" href="{{ url_for('pages.bible_book', translation_code=selected_translation.code, book_code=book.code) }}">
+                <span class="bible-book-order">{{ "%02d"|format(book.canonical_order) }}</span>
+                <span class="bible-book-name">{{ book.name_pt }}</span>
+                <span class="bible-book-arrow" aria-hidden="true">↗</span>
+              </a>
+            {% endfor %}
+          </div>
+        </div>
+        <p class="bible-search-empty" data-bible-search-empty hidden role="status">Nenhum livro encontrado. Confira a busca e tente novamente.</p>
+
+        <section class="bible-provenance" aria-label="Créditos da tradução">
+          <p class="bible-provenance-title">Créditos da tradução</p>
+          <div class="translation-provenance">
+            <p class="translation-credit">{{ selected_translation.attribution_text }}</p>
+            <p class="translation-source-links">
+              <a href="{{ selected_translation.license_evidence_url }}" rel="noopener noreferrer">Fonte oficial</a>
+              <span aria-hidden="true">·</span>
+              <a href="{{ selected_translation.license_url }}" rel="noopener noreferrer">{{ selected_translation.license_name }}</a>
+            </p>
+          </div>
+        </section>
+      {% elif translation_requested %}
+        <p class="bible-empty" role="status">A tradução solicitada não está disponível ou não possui conteúdo autorizado.</p>
+      {% endif %}
+    </section>
+  {% else %}
+    <section class="bible-empty-state bible-library-empty" role="status">
+      <span class="empty-mark" aria-hidden="true">✦</span>
+      <h2>Nenhuma tradução autorizada disponível</h2>
+      <p>Quando uma tradução verificada for importada, ela aparecerá aqui. Nenhum texto é gerado ou substituído.</p>
+    </section>
+  {% endif %}
+{% endblock %}

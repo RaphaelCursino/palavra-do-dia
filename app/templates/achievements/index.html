@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+
+{% block title %}Conquistas — Palavra do Dia{% endblock %}
+
+{% block content %}
+  <section class="page-intro">
+    <p class="eyebrow">Constância que floresce</p>
+    <h1>Conquistas</h1>
+    <p>{{ unlocked_count }} de {{ achievements|length }} conquistas desbloqueadas.</p>
+  </section>
+  <section class="achievement-grid" aria-label="Lista de conquistas">
+    {% for achievement in achievements %}
+      <article class="achievement-card{% if achievement.unlocked %} is-unlocked{% endif %}">
+        <div class="achievement-icon" aria-hidden="true">{{ "✦" if achievement.unlocked else "○" }}</div>
+        <div>
+          <p class="eyebrow">{{ achievement.category }}</p>
+          <h2>{{ achievement.title }}</h2>
+          <p>{{ achievement.description }}</p>
+          <div class="achievement-progress" role="progressbar" aria-valuemin="0" aria-valuemax="{{ achievement.target }}" aria-valuenow="{{ achievement.progress }}">
+            <span style="width: {{ (achievement.progress / achievement.target * 100)|round|int }}%"></span>
+          </div>
+          <small>{{ achievement.progress }} / {{ achievement.target }} {{ achievement.unit }}{% if achievement.unlocked_at %} · desbloqueada em {{ achievement.unlocked_at[:10] }}{% endif %}</small>
+        </div>
+      </article>
+    {% endfor %}
+  </section>
+{% endblock %}

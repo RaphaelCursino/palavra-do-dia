@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+
+{% block title %}Solicitação inválida — Palavra do Dia{% endblock %}
+
+{% block content %}
+  <section class="favorites-empty" aria-labelledby="page-title">
+    <p class="eyebrow">Solicitação não validada</p>
+    <h1 id="page-title">Não foi possível concluir a ação</h1>
+    <p>Atualize a página e tente novamente. Nenhuma alteração foi feita nos favoritos.</p>
+    <a class="text-link" href="{{ url_for('pages.favorites_index') }}">Ver meus favoritos</a>
+  </section>
+{% endblock %}

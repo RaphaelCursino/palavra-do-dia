@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+
+{% block title %}Minhas Anotações — Palavra do Dia{% endblock %}
+
+{% block content %}
+  <section class="personal-page-hero" aria-labelledby="page-title">
+    <p class="eyebrow"><span aria-hidden="true">✦</span> Suas palavras, em privado</p>
+    <h1 id="page-title">Minhas <em>Anotações</em>.</h1>
+    <p>Registros pessoais ligados aos versículos. Eles não alteram o texto bíblico e ficam neste navegador.</p>
+  </section>
+  {% if personal_notice %}<p class="favorite-notice" role="status">{{ personal_notice }}</p>{% endif %}
+  {% if annotations %}
+    <section class="personal-record-list" aria-label="Anotações salvas">
+      {% for annotation in annotations %}
+        <article class="personal-record-card">
+          <div class="personal-record-heading">
+            <div>
+              <p class="card-kicker">{{ annotation.translation_name }}</p>
+              <h2><a href="{{ url_for('pages.bible_chapter', translation_code=annotation.translation_code, book_code=annotation.book_code, chapter_number=annotation.chapter_number, _anchor='verse-' ~ annotation.verse_number) }}">{{ annotation.reference }}</a></h2>
+            </div>
+            <span class="personal-record-date">{{ annotation.updated_at[:10] }}</span>
+          </div>
+          <form method="post" action="{{ url_for('pages.save_verse_annotation') }}" class="personal-edit-form">
+            <input type="hidden" name="csrf_token" value="{{ personal_csrf_token }}">
+            <input type="hidden" name="verse_id" value="{{ annotation.verse_id }}">
+            <label for="note-{{ annotation.id }}">Sua anotação</label>
+            <textarea id="note-{{ annotation.id }}" name="note_text" rows="4" maxlength="5000" required>{{ annotation.note_text }}</textarea>
+            <button class="personal-submit-button" type="submit">Salvar alterações</button>
+          </form>
+          <div class="personal-record-actions">
+            <a class="text-link" href="{{ url_for('pages.bible_chapter', translation_code=annotation.translation_code, book_code=annotation.book_code, chapter_number=annotation.chapter_number, _anchor='verse-' ~ annotation.verse_number) }}">Abrir capítulo →</a>
+            <form method="post" action="{{ url_for('pages.remove_verse_annotation', annotation_id=annotation.id) }}" data-confirm="Excluir esta anotação pessoal?">
+              <input type="hidden" name="csrf_token" value="{{ personal_csrf_token }}">
+              <button class="personal-delete-button" type="submit">Excluir anotação</button>
+            </form>
+          </div>
+        </article>
+      {% endfor %}
+    </section>
+  {% else %}
+    <section class="personal-empty" role="status">
+      <span class="empty-mark" aria-hidden="true">✎</span>
+      <h2>Suas anotações começam na leitura</h2>
+      <p>Abra um capítulo bíblico e use “Minhas anotações e marcações” junto ao versículo que deseja guardar.</p>
+      <a class="text-link" href="{{ url_for('pages.bible_index') }}">Abrir a Bíblia →</a>
+    </section>
+  {% endif %}
+{% endblock %}

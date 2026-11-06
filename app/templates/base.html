@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="{{ '#0b1524' if reader_preferences.theme == 'dark' else '#fff8f8' }}">
+    <meta name="description" content="Uma pausa diária para leitura e reflexão bíblica.">
+    <title>{% block title %}Palavra do Dia{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <script src="{{ url_for('static', filename='js/app.js') }}" defer></script>
+  </head>
+  <body data-theme="{{ reader_preferences.theme }}" data-font-scale="{{ reader_preferences.font_scale }}" data-verse-spacing="{{ reader_preferences.verse_spacing }}" style="--reader-font-scale: {{ reader_preferences.font_scale / 100 }}">
+    <a class="skip-link" href="#main-content">Pular para o conteúdo</a>
+    <header class="site-header">
+      <a class="brand" href="{{ url_for('pages.home') }}" aria-label="Palavra do Dia — Início">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 32 32" fill="none">
+            <path d="M16 5v22M9 12h14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+            <path d="M5.5 26.5c5.8-2.2 15.2-2.2 21 0" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+        </span>
+        <span class="brand-name">Palavra <span>do Dia</span></span>
+      </a>
+      <time class="header-date" datetime="{{ today_iso }}">
+        <span class="date-dot" aria-hidden="true"></span>
+        <span class="date-full">{{ today_label }}</span>
+        <span class="date-short">{{ today_iso[8:10] }}/{{ today_iso[5:7] }}/{{ today_iso[:4] }}</span>
+      </time>
+    </header>
+
+    <nav class="primary-nav" aria-label="Navegação principal">
+      <ul>
+        <li>
+          <a class="nav-item{% if request.endpoint == 'pages.home' %} is-current{% endif %}" href="{{ url_for('pages.home') }}"{% if request.endpoint == 'pages.home' %} aria-current="page"{% endif %}>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3.5 10 8.5-7 8.5 7v10a1 1 0 0 1-1 1h-5.2v-6.5h-4.6V21H4.5a1 1 0 0 1-1-1z"/></svg>
+            <span>Início</span>
+          </a>
+        </li>
+        <li>
+          <a class="nav-item{% if request.endpoint in ('pages.bible_index', 'pages.bible_book', 'pages.bible_chapter') %} is-current{% endif %}" href="{{ url_for('pages.bible_index') }}"{% if request.endpoint in ('pages.bible_index', 'pages.bible_book', 'pages.bible_chapter') %} aria-current="page"{% endif %}>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5c2.8-1.1 5.4-.7 8 1.1v14c-2.6-1.8-5.2-2.2-8-1.1zM20 5.5c-2.8-1.1-5.4-.7-8 1.1v14c2.6-1.8 5.2-2.2 8-1.1z"/></svg>
+            <span>Bíblia</span>
+          </a>
+        </li>
+        <li>
+          <a class="nav-item{% if request.endpoint in ('pages.reflections_index', 'pages.reflection_detail') %} is-current{% endif %}" href="{{ url_for('pages.reflections_index') }}"{% if request.endpoint in ('pages.reflections_index', 'pages.reflection_detail') %} aria-current="page"{% endif %}>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8zM19 15l1 2.5 2.5 1-2.5 1L19 22l-1-2.5-2.5-1 2.5-1z"/></svg>
+            <span>Reflexões</span>
+          </a>
+        </li>
+        <li>
+          <a class="nav-item{% if request.endpoint in ('pages.favorites_index', 'pages.favorite_verse', 'pages.favorite_reflection', 'pages.unfavorite') %} is-current{% endif %}" href="{{ url_for('pages.favorites_index') }}"{% if request.endpoint in ('pages.favorites_index', 'pages.favorite_verse', 'pages.favorite_reflection', 'pages.unfavorite') %} aria-current="page"{% endif %}>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4.5A2.5 2.5 0 0 1 8.5 2H20v18H8.5A2.5 2.5 0 0 0 6 22zM6 4.5V22m0-16H4v14h2"/></svg>
+            <span>Favoritos</span>
+          </a>
+        </li>
+        <li>
+          <a class="nav-item{% if request.endpoint == 'pages.progress_dashboard' %} is-current{% endif %}" href="{{ url_for('pages.progress_dashboard') }}"{% if request.endpoint == 'pages.progress_dashboard' %} aria-current="page"{% endif %}>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V5m0 14h17M8 15l3-4 3 2 5-7"/></svg>
+            <span>Meu progresso</span>
+          </a>
+        </li>
+        <li class="nav-more-item">
+          <details class="nav-more{% if request.endpoint in ('pages.annotations_index', 'pages.prayer_journal', 'pages.reader_settings', 'pages.achievements_dashboard') %} is-current{% endif %}">
+              <summary class="nav-item" aria-haspopup="menu" aria-expanded="false">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7.5h16M4 12h16M4 16.5h10"/><circle cx="18" cy="16.5" r="2.2"/></svg>
+              <span>Meu espaço</span>
+                <svg class="nav-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 9 5 5 5-5"/></svg>
+              </summary>
+              <div class="nav-more-menu" role="menu">
+                <a role="menuitem" href="{{ url_for('pages.achievements_dashboard') }}"{% if request.endpoint == 'pages.achievements_dashboard' %} aria-current="page"{% endif %}>
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2.2 4.5 5 .7-3.6 3.5.9 5-4.5-2.4-4.5 2.4.9-5-3.6-3.5 5-.7z"/></svg>
+                  <span>Conquistas</span>
+                </a>
+                <a role="menuitem" href="{{ url_for('pages.annotations_index') }}"{% if request.endpoint == 'pages.annotations_index' %} aria-current="page"{% endif %}>
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4.5h12v15H6zM9 8h6M9 12h6M9 16h4"/></svg>
+                  <span>Minhas Anotações</span>
+                </a>
+                <a role="menuitem" href="{{ url_for('pages.prayer_journal') }}"{% if request.endpoint == 'pages.prayer_journal' %} aria-current="page"{% endif %}>
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4.5h12v15H6zM9 8h6M9 12h6M9 16h3"/></svg>
+                  <span>Diário de Oração</span>
+                </a>
+                <a role="menuitem" href="{{ url_for('pages.reader_settings') }}"{% if request.endpoint == 'pages.reader_settings' %} aria-current="page"{% endif %}>
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 1 1.8 2.1.5 1.8-1 1.8 1-0.2 2.2 1.4 1.6-1.4 1.7.2 2.2-1.8 1-2.1-.5-1 1.8-2-1.8-2.1.5-1.8-1 .2-2.2-1.4-1.7 1.4-1.6-.2-2.2 1.8-1 2.1.5z"/><circle cx="12" cy="12" r="2.5"/></svg>
+                  <span>Configurações</span>
+                </a>
+              </div>
+          </details>
+        </li>
+      </ul>
+    </nav>
+
+    <main id="main-content" class="page-shell">
+      {% if favorite_notice %}
+        <p class="favorite-notice" role="status">{{ favorite_notice }}</p>
+      {% endif %}
+      {% block content %}{% endblock %}
+    </main>
+
+    <footer class="site-footer">
+      <span class="footer-flourish" aria-hidden="true">✦</span>
+      <p>Uma pausa com propósito, no seu tempo.</p>
+      <p>Feito por Raphael Cursino</p>
+    </footer>
+  </body>
+</html>

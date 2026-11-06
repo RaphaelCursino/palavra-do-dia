@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+
+{% block title %}{{ reflection.title }} — Palavra do Dia{% endblock %}
+
+{% block content %}
+  <article class="reflection-card reflection-detail" aria-labelledby="page-title">
+    <a class="text-link back-link" href="{{ url_for('pages.reflections_index') }}">← Voltar ao histórico</a>
+    <header class="reflection-header">
+      <div>
+        <p class="card-kicker">Reflexão e oração</p>
+        <h1 id="page-title">{{ reflection.title }}</h1>
+      </div>
+      <time class="reflection-date" datetime="{{ reflection.reading_date }}">{{ reflection.display_date }}</time>
+    </header>
+
+    <p class="reflection-reference">
+      <span>Leitura relacionada</span>
+      {{ reflection.reference }} · {{ reflection.translation_name }}
+    </p>
+
+    <div class="reflection-copy">
+      <p>{{ reflection.reflection_text }}</p>
+    </div>
+
+    <div class="reflection-insight">
+      <h2>Em poucas palavras</h2>
+      <p>{{ reflection.simple_message }}</p>
+    </div>
+
+    <div class="reflection-application">
+      <span class="application-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M12 3v18M6.5 8.5h11M5 21c4-1.4 10-1.4 14 0"/></svg>
+      </span>
+      <div>
+        <h2>Para levar à vida</h2>
+        <p>{{ reflection.practical_application }}</p>
+      </div>
+    </div>
+
+    <blockquote class="prayer-card">
+      <p class="card-kicker">Oração do dia</p>
+      <p class="prayer-text" data-prayer-text>{{ reflection.prayer_text }}</p>
+      <div class="prayer-actions">
+        <button class="share-button copy-prayer-button" type="button" data-copy-prayer>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h2"/></svg>
+          <span>Copiar oração</span>
+        </button>
+        <p class="share-feedback" data-prayer-feedback aria-live="polite"></p>
+      </div>
+    </blockquote>
+
+    <div class="reflection-question">
+      <span aria-hidden="true">?</span>
+      <div>
+        <h2>Para refletir</h2>
+        <p>{{ reflection.reflection_question }}</p>
+      </div>
+    </div>
+
+    <footer class="reflection-footer">
+      <span>Por {{ reflection.author }}</span>
+      <div class="reflection-actions">
+        <form class="favorite-action" method="post" action="{{ url_for('pages.unfavorite', favorite_id=reflection_favorite_id) if reflection_favorited else url_for('pages.favorite_reflection') }}">
+          <input type="hidden" name="csrf_token" value="{{ config['FAVORITES_CSRF_TOKEN'] }}">
+          <input type="hidden" name="next" value="{{ request.full_path }}">
+          {% if not reflection_favorited %}
+            <input type="hidden" name="reflection_id" value="{{ reflection.id }}">
+          {% endif %}
+          <button class="favorite-button{% if reflection_favorited %} is-saved{% endif %}" type="submit">
+            <span aria-hidden="true">{% if reflection_favorited %}♥{% else %}♡{% endif %}</span>
+            {{ "Remover dos favoritos" if reflection_favorited else "Salvar reflexão" }}
+          </button>
+        </form>
+        <a class="text-link" href="{{ url_for('pages.reflections_index') }}">Ver histórico <span aria-hidden="true">→</span></a>
+      </div>
+    </footer>
+  </article>
+{% endblock %}

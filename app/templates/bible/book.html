@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+
+{% block title %}{{ book.name_pt }} — Bíblia — Palavra do Dia{% endblock %}
+
+{% block content %}
+  <nav class="bible-breadcrumbs" aria-label="Caminho da página">
+    <a href="{{ url_for('pages.bible_index', translation=translation.code) }}">Bíblia Sagrada</a>
+    <span aria-hidden="true">/</span>
+    <span>{{ book.name_pt }}</span>
+  </nav>
+
+  <section class="bible-reader-hero bible-book-hero" aria-labelledby="page-title">
+    <p class="bible-eyebrow"><span aria-hidden="true">✦</span> {{ "Antigo Testamento" if book.testament == "OT" else "Novo Testamento" }}</p>
+    <h1 id="page-title">{{ book.name_pt }}</h1>
+    <p>Escolha um capítulo para começar a leitura.</p>
+    <span class="bible-edition-inline">{{ translation.name }}</span>
+  </section>
+
+  <section class="bible-library-panel bible-chapters-panel" aria-labelledby="chapters-title">
+    <div class="bible-library-toolbar">
+      <div class="bible-library-heading">
+        <p class="bible-section-kicker">Navegação por capítulo</p>
+        <h2 id="chapters-title">Capítulos de {{ book.name_pt }}</h2>
+      </div>
+      <a class="bible-back-link" href="{{ url_for('pages.bible_index', translation=translation.code) }}">← Todos os livros</a>
+    </div>
+    <div class="bible-chapter-grid" aria-label="Capítulos de {{ book.name_pt }}">
+      {% for chapter in chapters %}
+        <a class="bible-chapter-card" href="{{ url_for('pages.bible_chapter', translation_code=translation.code, book_code=book.code, chapter_number=chapter.chapter_number) }}">
+          <span>{{ chapter.chapter_number }}</span>
+          <small>{{ chapter.verse_count }} versículos</small>
+        </a>
+      {% endfor %}
+    </div>
+    <p class="translation-credit bible-book-attribution">{{ translation.attribution_text }}</p>
+  </section>
+{% endblock %}

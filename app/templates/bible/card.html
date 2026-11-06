@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+
+{% block title %}Cartão de versículo — Palavra do Dia{% endblock %}
+
+{% block content %}
+  <section class="page-intro card-page-intro">
+    <p class="eyebrow">Compartilhe uma palavra</p>
+    <h1>Cartão de versículo</h1>
+    <p>Escolha um versículo da tradução BLIVRE e personalize uma imagem para compartilhar.</p>
+  </section>
+
+  <section class="card-builder-grid" data-card-builder>
+    <form class="card-builder-form" method="get" action="{{ url_for('pages.bible_card') }}">
+      <label for="card-translation">Tradução autorizada</label>
+      <select id="card-translation" name="translation">
+        {% for translation in translations %}
+          <option value="{{ translation.code }}" {% if selected_translation and translation.code == selected_translation.code %}selected{% endif %}>
+            {{ translation.name }}
+          </option>
+        {% endfor %}
+      </select>
+      <label for="card-reference">Referência</label>
+      <input id="card-reference" name="referencia" value="{{ reference }}" placeholder="João 3:16" autocomplete="off">
+      <button class="button button-primary" type="submit">Localizar versículo</button>
+      <p class="form-help">A busca usa somente textos aprovados presentes no banco local.</p>
+      {% if card_message %}<p class="form-error" role="alert">{{ card_message }}</p>{% endif %}
+    </form>
+
+    {% if verse %}
+      <div class="card-workspace">
+        <div class="card-options" aria-label="Opções do cartão">
+          <label>Modelo
+            <select data-card-option="model">
+              <option value="aurora">Aurora</option>
+              <option value="noite">Noite</option>
+              <option value="papel">Papel</option>
+            </select>
+          </label>
+          <label>Cor
+            <select data-card-option="accent">
+              <option value="gold">Dourado</option>
+              <option value="blue">Azul</option>
+              <option value="rose">Rosé</option>
+            </select>
+          </label>
+          <label>Tipografia
+            <select data-card-option="font">
+              <option value="serif">Serifada</option>
+              <option value="sans">Sem serifa</option>
+            </select>
+          </label>
+          <label>Alinhamento
+            <select data-card-option="align">
+              <option value="center">Centro</option>
+              <option value="left">Esquerda</option>
+            </select>
+          </label>
+        </div>
+        <div class="verse-card-preview" data-card-preview>
+          <canvas width="1200" height="1200" data-verse-card-canvas aria-label="Pré-visualização do cartão"></canvas>
+        </div>
+        <div class="card-actions">
+          <button class="button button-primary" type="button" data-card-download>Baixar PNG</button>
+          <button class="button button-secondary" type="button" data-card-share>Compartilhar</button>
+        </div>
+        <p class="card-attribution">Texto: {{ selected_translation.name }} (BLIVRE/porbr2018). {{ selected_translation.attribution_text }}</p>
+        <div hidden data-card-content
+             data-verse-text="{{ verse.text }}"
+             data-reference="{{ verse.book_name }} {{ verse.chapter_number }}:{{ verse.verse_number }}"
+             data-translation="{{ selected_translation.name }}"
+             data-attribution="{{ selected_translation.attribution_text }}"></div>
+      </div>
+    {% endif %}
+  </section>
+{% endblock %}

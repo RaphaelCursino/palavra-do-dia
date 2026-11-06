@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+
+{% block title %}Configurações — Palavra do Dia{% endblock %}
+
+{% block content %}
+  <section class="personal-page-hero" aria-labelledby="page-title">
+    <p class="eyebrow"><span aria-hidden="true">✦</span> Ajuste ao seu ritmo</p>
+    <h1 id="page-title"><svg class="settings-title-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 1 1.8 2.1.5 1.8-1 1.8 1-.2 2.2 1.4 1.6-1.4 1.7.2 2.2-1.8 1-2.1-.5-1 1.8-2-1.8-2.1.5-1.8-1 .2-2.2-1.4-1.7 1.4-1.6-.2-2.2 1.8-1 2.1.5z"/><circle cx="12" cy="12" r="2.5"/></svg>Configurações de <em>leitura</em>.</h1>
+    <p>Suas preferências são salvas neste navegador e aplicadas à Bíblia em todas as páginas.</p>
+  </section>
+  {% if personal_notice %}<p class="favorite-notice" role="status">{{ personal_notice }}</p>{% endif %}
+  <section class="personal-form-panel settings-panel" aria-labelledby="settings-title">
+    <div class="personal-section-heading">
+      <p class="eyebrow"><span aria-hidden="true">✦</span> Preferências pessoais</p>
+      <h2 id="settings-title">Conforto de leitura</h2>
+    </div>
+    <form method="post" action="{{ url_for('pages.save_reader_settings') }}" class="personal-form settings-form">
+      <input type="hidden" name="csrf_token" value="{{ personal_csrf_token }}">
+      <label for="reader-theme">Tema</label>
+      <select id="reader-theme" name="theme" required>
+        <option value="light"{% if preferences.theme == "light" %} selected{% endif %}>Claro</option>
+        <option value="dark"{% if preferences.theme == "dark" %} selected{% endif %}>Escuro</option>
+      </select>
+      <label for="reader-font-scale">Tamanho da fonte bíblica</label>
+      <div class="reader-range-control">
+        <input id="reader-font-scale" name="font_scale" type="range" min="80" max="150" step="10" value="{{ preferences.font_scale }}" data-range-output="reader-font-scale-value">
+        <output id="reader-font-scale-value" for="reader-font-scale">{{ preferences.font_scale }}%</output>
+      </div>
+      <label for="verse-spacing">Espaçamento entre versículos</label>
+      <select id="verse-spacing" name="verse_spacing" required>
+        <option value="comfortable"{% if preferences.verse_spacing == "comfortable" %} selected{% endif %}>Confortável</option>
+        <option value="compact"{% if preferences.verse_spacing == "compact" %} selected{% endif %}>Compacto</option>
+      </select>
+      <button class="personal-submit-button" type="submit">Salvar preferências</button>
+    </form>
+    <p class="settings-local-note">Não há contas nem sincronização em nuvem. As preferências pertencem a este navegador.</p>
+  </section>
+{% endblock %}

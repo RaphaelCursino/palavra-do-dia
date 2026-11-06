@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+
+{% block title %}Meus Favoritos — Palavra do Dia{% endblock %}
+
+{% block content %}
+  <section class="page-intro favorites-intro" aria-labelledby="page-title">
+    <p class="eyebrow"><span aria-hidden="true">✦</span> Guardados com carinho</p>
+    <h1 id="page-title">Meus <em>Favoritos</em>.</h1>
+    <p class="intro-copy">
+      Versículos e reflexões que você escolheu guardar.
+      Estes favoritos ficam salvos somente neste navegador.
+    </p>
+  </section>
+
+  <nav class="favorite-filters" aria-label="Filtrar favoritos">
+    {% for value, label in (("todos", "Todos"), ("versiculos", "Versículos"), ("reflexoes", "Reflexões")) %}
+      <a
+        class="favorite-filter{% if selected_filter == value %} is-selected{% endif %}"
+        href="{{ url_for('pages.favorites_index', tipo=value) }}"
+        {% if selected_filter == value %}aria-current="page"{% endif %}
+      >{{ label }}</a>
+    {% endfor %}
+  </nav>
+
+  {% if personal_notice %}
+    <p class="favorite-notice" role="status">{{ personal_notice }}</p>
+  {% endif %}
+
+  <form class="highlight-filters" method="get" action="{{ url_for('pages.favorites_index') }}">
+    <input type="hidden" name="tipo" value="versiculos">
+    <label for="favorite-category-filter">Categoria</label>
+    <select id="favorite-category-filter" name="categoria">
+      <option value="">Todas</option>
+      {% for code, label in highlight_categories.items() %}
+        <option value="{{ code }}"{% if selected_category == code %} selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+    <label for="favorite-color-filter">Cor</label>
+    <select id="favorite-color-filter" name="cor">
+      <option value="">Todas</option>
+      {% for code, label in highlight_colors.items() %}
+        <option value="{{ code }}"{% if selected_color == code %} selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+    <button class="select-submit" type="submit">Filtrar marcações</button>
+    {% if selected_category or selected_color %}
+      <a class="text-link" href="{{ url_for('pages.favorites_index', tipo='versiculos') }}">Limpar filtros</a>
+    {% endif %}
+  </form>
+
+  {% if favorites %}
+    <section class="favorites-list" aria-label="Itens favoritos">
+      {% for favorite in favorites %}
+        <article class="favorite-card">
+          <div class="favorite-card-content">
+            {% if favorite.favorite_type == "verse" %}
+              <p class="card-kicker">Versículo favorito</p>
+              <h2>{{ favorite.reference_text }}</h2>
+              <p class="favorite-verse-text">{{ favorite.verse_text }}</p>
+              <p class="favorite-meta">
+                {{ favorite.translation_name }} · {{ favorite.attribution_text }}
+              </p>
+              {% if favorite.highlight_color %}
+                <p class="favorite-highlight-label">
+                  Marcado em {{ highlight_colors[favorite.highlight_color] }}
+                  · {{ highlight_categories[favorite.highlight_category] }}
+                </p>
+                <form class="favorite-highlight-edit" method="post" action="{{ url_for('pages.update_verse_highlight', favorite_id=favorite.favorite_id) }}">
+                  <input type="hidden" name="csrf_token" value="{{ personal_csrf_token }}">
+                  <label>
+                    <span>Cor</span>
+                    <select name="color">
+                      {% for code, label in highlight_colors.items() %}
+                        <option value="{{ code }}"{% if favorite.highlight_color == code %} selected{% endif %}>{{ label }}</option>
+                      {% endfor %}
+                    </select>
+                  </label>
+                  <label>
+                    <span>Categoria</span>
+                    <select name="category">
+                      {% for code, label in highlight_categories.items() %}
+                        <option value="{{ code }}"{% if favorite.highlight_category == code %} selected{% endif %}>{{ label }}</option>
+                      {% endfor %}
+                    </select>
+                  </label>
+                  <button class="personal-submit-button" type="submit">Atualizar</button>
+                </form>
+                <form method="post" action="{{ url_for('pages.remove_verse_highlight', favorite_id=favorite.favorite_id) }}">
+                  <input type="hidden" name="csrf_token" value="{{ personal_csrf_token }}">
+                  <button class="personal-delete-button" type="submit">Remover marcação</button>
+                </form>
+              {% endif %}
+            {% else %}
+              <p class="card-kicker">Reflexão favorita</p>
+              <h2>
+                <a href="{{ url_for('pages.reflection_detail', reflection_id=favorite.reflection_id) }}">
+                  {{ favorite.title }}
+                </a>
+              </h2>
+              <p class="favorite-meta">
+                {{ favorite.reference_text }} · Leitura de {{ favorite.display_reading_date }}
+              </p>
+            {% endif %}
+            <p class="favorite-date">Salvo em {{ favorite.display_favorited_at }}</p>
+          </div>
+          <form
+            class="favorite-action"
+            method="post"
+            action="{{ url_for('pages.unfavorite', favorite_id=favorite.favorite_id) }}"
+          >
+            <input type="hidden" name="csrf_token" value="{{ config['FAVORITES_CSRF_TOKEN'] }}">
+            <input type="hidden" name="next" value="{{ request.full_path }}">
+            <button class="favorite-button is-saved" type="submit">
+              <span aria-hidden="true">♥</span>
+              Remover
+            </button>
+          </form>
+        </article>
+      {% endfor %}
+    </section>
+  {% else %}
+    <section class="favorites-empty" role="status">
+      <span class="empty-mark" aria-hidden="true">
+        <svg viewBox="0 0 48 48" fill="none">
+          <path d="M24 39S7 29.5 7 17.5A9.5 9.5 0 0 1 24 11a9.5 9.5 0 0 1 17 6.5C41 29.5 24 39 24 39Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+        </svg>
+      </span>
+      <h2>Ainda não há favoritos</h2>
+      <p>Quando encontrar um versículo ou uma reflexão que queira guardar, use “Salvar” para encontrá-lo aqui.</p>
+      <a class="text-link" href="{{ url_for('pages.home') }}">Voltar ao início <span aria-hidden="true">→</span></a>
+    </section>
+  {% endif %}
+{% endblock %}

@@ -1,0 +1,197 @@
+{% extends "base.html" %}
+
+{% block title %}Meu Progresso — Palavra do Dia{% endblock %}
+
+{% block content %}
+  {% if progress_notice %}
+    <p class="favorite-notice" role="status">{{ progress_notice }}</p>
+  {% endif %}
+
+  <section class="page-intro progress-intro" aria-labelledby="page-title">
+    <p class="eyebrow"><span aria-hidden="true">✦</span> Um passo de cada vez</p>
+    <h1 id="page-title">Meu <em>Progresso</em>.</h1>
+    <p class="intro-copy">
+      Acompanhe sua rotina de leitura. Os registros ficam salvos neste navegador.
+    </p>
+  </section>
+
+  <section class="achievement-summary" aria-labelledby="achievement-summary-title">
+    <div class="progress-section-header">
+      <div>
+        <p class="eyebrow"><span aria-hidden="true">✦</span> Pequenas vitórias</p>
+        <h2 id="achievement-summary-title">Conquistas</h2>
+      </div>
+      <a class="text-link" href="{{ url_for('pages.achievements_dashboard') }}">Ver todas</a>
+    </div>
+    {% if achievement_summary %}
+      <div class="achievement-summary-list">
+        {% for achievement in achievement_summary %}
+          <div class="achievement-summary-item"><span aria-hidden="true">✦</span><strong>{{ achievement.title }}</strong><small>Desbloqueada</small></div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="history-empty">Conclua uma leitura para desbloquear sua primeira conquista.</p>
+    {% endif %}
+  </section>
+
+  <section class="progress-statistics" aria-label="Estatísticas de leitura">
+    <article class="progress-stat">
+      <span class="progress-stat-icon" aria-hidden="true">✦</span>
+      <p class="card-kicker">Dias concluídos</p>
+      <strong>{{ metrics.total_days }}</strong>
+      <span>dias registrados</span>
+    </article>
+    <article class="progress-stat">
+      <span class="progress-stat-icon" aria-hidden="true">↗</span>
+      <p class="card-kicker">Sequência atual</p>
+      <strong>{{ metrics.current_streak }}</strong>
+      <span>{{ "dia consecutivo" if metrics.current_streak == 1 else "dias consecutivos" }}</span>
+    </article>
+    <article class="progress-stat">
+      <span class="progress-stat-icon" aria-hidden="true">♕</span>
+      <p class="card-kicker">Maior sequência</p>
+      <strong>{{ metrics.longest_streak }}</strong>
+      <span>{{ "dia consecutivo" if metrics.longest_streak == 1 else "dias consecutivos" }}</span>
+    </article>
+  </section>
+
+  <section class="weekly-goal-summary" aria-labelledby="weekly-summary-title">
+    <div class="weekly-goal-summary-header">
+      <div>
+        <p class="eyebrow"><span aria-hidden="true">✦</span> Esta semana</p>
+        <h2 id="weekly-summary-title">{{ metrics.weekly_total }}{% if weekly_goal %} de {{ weekly_goal }}{% endif %} dias concluídos</h2>
+        {% if weekly_goal %}
+          <p>{% if weekly_remaining %}{{ "Falta" if weekly_remaining == 1 else "Faltam" }} {{ weekly_remaining }} {{ "dia" if weekly_remaining == 1 else "dias" }} para alcançar sua meta.{% else %}Meta semanal alcançada. Que bom ter você por aqui.{% endif %}</p>
+        {% else %}
+          <p>Defina uma meta de 1 a 7 dias para acompanhar seu objetivo semanal.</p>
+        {% endif %}
+      </div>
+      {% if weekly_goal %}
+        <strong class="weekly-goal-percent">{{ weekly_percent }}<small>%</small></strong>
+      {% endif %}
+    </div>
+    {% if weekly_goal %}
+      <div class="goal-progress weekly-goal-progress" role="progressbar" aria-label="Cumprimento da meta semanal" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ weekly_percent }}">
+        <span style="width: {{ weekly_percent }}%"></span>
+      </div>
+    {% endif %}
+    <div class="weekly-days" aria-label="Dias da semana">
+      {% for day in weekly_days %}
+        <div class="weekly-day{% if day.completed %} is-completed{% endif %}{% if day.is_today %} is-today{% endif %}{% if not day.available %} is-upcoming{% endif %}"{% if day.is_today %} aria-current="date"{% endif %}>
+          <span>{{ day.label }}</span>
+          <strong>{{ day.day_number }}</strong>
+          {% if day.completed %}<small aria-label="Leitura concluída">✓</small>{% endif %}
+        </div>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="progress-calendar-panel" aria-labelledby="calendar-title">
+    <div class="progress-section-header">
+      <div>
+        <p class="eyebrow"><span aria-hidden="true">✦</span> Sua constância</p>
+        <h2 id="calendar-title">Calendário de leitura</h2>
+      </div>
+      <nav class="month-navigation" aria-label="Navegar entre meses">
+        {% if calendar.previous_month %}
+          <a class="month-link" href="{{ url_for('pages.progress_dashboard', ano=calendar.previous_month[:4], mes=calendar.previous_month[5:7]) }}" aria-label="Mês anterior">←</a>
+        {% endif %}
+        <strong>{{ calendar.title }}</strong>
+        {% if calendar.next_month %}
+          <a class="month-link" href="{{ url_for('pages.progress_dashboard', ano=calendar.next_month[:4], mes=calendar.next_month[5:7]) }}" aria-label="Próximo mês">→</a>
+        {% endif %}
+      </nav>
+    </div>
+    <div class="calendar-grid" role="grid" aria-label="{{ calendar.title }}">
+      {% for weekday in weekdays %}
+        <span class="calendar-weekday" role="columnheader">{{ weekday }}</span>
+      {% endfor %}
+      {% for week in calendar.weeks %}
+        {% for day in week %}
+          <span
+            class="calendar-day{% if not day.in_month %} is-outside{% endif %}{% if day.completed %} is-completed{% endif %}{% if day.date == today_iso %} is-today{% endif %}"
+            role="gridcell"
+            {% if day.completed %}aria-label="{{ day.date }}: leitura concluída"{% elif day.in_month %}aria-label="{{ day.date }}: sem leitura concluída"{% else %}aria-hidden="true"{% endif %}
+            {% if day.date == today_iso %}aria-current="date"{% endif %}
+          >
+            <span>{{ day.day_number }}</span>
+            {% if day.completed %}<span class="calendar-check" aria-hidden="true">✓</span>{% endif %}
+          </span>
+        {% endfor %}
+      {% endfor %}
+    </div>
+    {% if not metrics.total_days %}
+      <p class="calendar-empty" role="status">
+        Ainda não há leituras concluídas. Quando marcar uma leitura válida, o dia aparecerá aqui.
+      </p>
+    {% endif %}
+    <p class="monthly-reading-summary">Neste mês: <strong>{{ monthly_total }}</strong> {{ "dia de leitura concluído" if monthly_total == 1 else "dias de leitura concluídos" }}.</p>
+    <p class="calendar-legend"><span aria-hidden="true">✓</span> Leitura concluída</p>
+  </section>
+
+  <section class="goal-panel" aria-labelledby="goal-title">
+    <div class="goal-copy">
+      <p class="eyebrow"><span aria-hidden="true">✦</span> Um objetivo seu</p>
+      <h2 id="goal-title">Meta semanal</h2>
+      <p>
+        {% if weekly_goal %}
+          Sua meta pode ser atualizada quando quiser. O progresso é contado apenas após marcar uma leitura válida como concluída.
+        {% else %}
+          Escolha quantos dias por semana deseja ler. A meta pode ser atualizada quando quiser.
+        {% endif %}
+      </p>
+      {% if weekly_goal %}
+        <div class="goal-progress" role="progressbar" aria-label="Progresso da meta semanal" aria-valuemin="0" aria-valuemax="{{ weekly_goal }}" aria-valuenow="{{ [metrics.weekly_total, weekly_goal]|min }}">
+          <span style="width: {{ [metrics.weekly_total * 100 // weekly_goal, 100]|min }}%"></span>
+        </div>
+      {% endif %}
+    </div>
+    <form class="goal-form" method="post" action="{{ url_for('pages.update_reading_goal') }}">
+      <input type="hidden" name="csrf_token" value="{{ progress_csrf_token }}">
+      <label for="weekly-target">Dias por semana</label>
+      <div class="goal-form-controls">
+        <select id="weekly-target" name="weekly_target" required>
+          {% for number in range(1, 8) %}
+            <option value="{{ number }}"{% if weekly_goal == number %} selected{% endif %}>
+              {{ number }} {{ "dia" if number == 1 else "dias" }}
+            </option>
+          {% endfor %}
+        </select>
+        <button class="select-submit" type="submit">{{ "Atualizar meta" if weekly_goal else "Definir meta" }}</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="completion-history" aria-labelledby="history-title">
+    <div class="progress-section-header">
+      <div>
+        <p class="eyebrow"><span aria-hidden="true">✦</span> Suas leituras</p>
+        <h2 id="history-title">Histórico</h2>
+      </div>
+    </div>
+    {% if history %}
+      <div class="completion-list">
+        {% for entry in history %}
+          <article class="completion-card">
+            <div>
+              <p class="card-kicker">{{ entry.display_completed_date }}</p>
+              <h3>{{ entry.reference }}</h3>
+              <p class="completion-meta">{{ entry.translation_name }}</p>
+            </div>
+            <form method="post" action="{{ url_for('pages.undo_completion', completion_id=entry.completion_id) }}">
+              <input type="hidden" name="csrf_token" value="{{ progress_csrf_token }}">
+              <button class="favorite-button is-saved" type="submit">Desfazer</button>
+            </form>
+          </article>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="progress-empty" role="status">
+        <span class="empty-mark" aria-hidden="true">✦</span>
+        <h3>Seu histórico começa com a primeira leitura</h3>
+        <p>As leituras só entram aqui quando você marca uma passagem válida como concluída.</p>
+        <a class="text-link" href="{{ url_for('pages.home') }}">Ir para a leitura do dia <span aria-hidden="true">→</span></a>
+      </div>
+    {% endif %}
+  </section>
+{% endblock %}

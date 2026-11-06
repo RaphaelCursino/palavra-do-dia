@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+
+{% block title %}{{ book.name_pt }} {{ verses[0].chapter_number }} — {{ translation.name }}{% endblock %}
+
+{% block content %}
+  {% if personal_notice %}<p class="favorite-notice" role="status">{{ personal_notice }}</p>{% endif %}
+  <nav class="bible-breadcrumbs" aria-label="Caminho da página">
+    <a href="{{ url_for('pages.bible_index', translation=translation.code) }}">Bíblia Sagrada</a>
+    <span aria-hidden="true">/</span>
+    <a href="{{ url_for('pages.bible_book', translation_code=translation.code, book_code=book.code) }}">{{ book.name_pt }}</a>
+    <span aria-hidden="true">/</span>
+    <span>Capítulo {{ verses[0].chapter_number }}</span>
+  </nav>
+
+  <section class="bible-reader-hero" aria-labelledby="page-title">
+    <p class="bible-eyebrow"><span aria-hidden="true">✦</span> {{ translation.name }}</p>
+    <h1 id="page-title">{{ book.name_pt }} <span>{{ verses[0].chapter_number }}</span></h1>
+    <p>Leia com calma. A Palavra no seu tempo.</p>
+    <span class="bible-edition-inline">{{ "Antigo Testamento" if book.testament == "OT" else "Novo Testamento" }} <i aria-hidden="true">·</i> {{ verses|length }} versículos</span>
+  </section>
+
+  <section class="bible-panel bible-reading-panel" aria-label="Versículos de {{ book.name_pt }} {{ verses[0].chapter_number }}">
+    <div class="bible-reader-toolbar">
+      <a class="bible-back-link" href="{{ url_for('pages.bible_book', translation_code=translation.code, book_code=book.code) }}">← Capítulos</a>
+      <div class="bible-quick-jump" role="group" aria-label="Acesso rápido à Bíblia">
+        <label for="bible-book-jump">Livro</label>
+        <select id="bible-book-jump" data-bible-book-jump>
+          {% for item in quick_jump_books %}
+            <option value="{{ url_for('pages.bible_book', translation_code=translation.code, book_code=item.code) }}"{% if item.code == book.code %} selected{% endif %}>{{ item.name_pt }}</option>
+          {% endfor %}
+        </select>
+        <label for="bible-chapter-jump">Capítulo</label>
+        <select id="bible-chapter-jump" data-bible-chapter-jump>
+          {% for item in chapters %}
+            <option value="{{ url_for('pages.bible_chapter', translation_code=translation.code, book_code=book.code, chapter_number=item.chapter_number) }}"{% if item.chapter_number == verses[0].chapter_number %} selected{% endif %}>{{ item.chapter_number }}</option>
+          {% endfor %}
+        </select>
+        <a class="bible-search-shortcut" href="{{ url_for('pages.bible_search', translation=translation.code) }}">Buscar</a>
+      </div>
+      <div class="bible-reader-tools" role="group" aria-label="Controles de leitura">
+        <div class="bible-font-controls" role="group" aria-label="Tamanho do texto">
+          <button type="button" data-reader-font="decrease" aria-label="Diminuir tamanho do texto" title="Diminuir texto">A<sup>−</sup></button>
+          <span data-reader-font-label aria-live="polite">Texto</span>
+          <button type="button" data-reader-font="increase" aria-label="Aumentar tamanho do texto" title="Aumentar texto">A<sup>+</sup></button>
+        </div>
+        <button class="bible-focus-toggle" type="button" data-reader-focus aria-pressed="false">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3m13-5h3a2 2 0 0 1 2 2v3M3 16v3a2 2 0 0 0 2 2h3m8 0h3a2 2 0 0 0 2-2v-3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+          <span data-reader-focus-label>Foco de leitura</span>
+        </button>
+      </div>
+    </div>
+
+    <ol class="bible-verse-list" data-reader-text style="--reader-font-scale: {{ preferences_font_scale if preferences_font_scale is defined else reader_preferences.font_scale / 100 }}">
+      {% for verse in verses %}
+        {% set favorite_id = favorite_ids.get(verse.verse_number) %}
+        {% set annotation = annotations_by_verse.get(verse.verse_number) %}
+        {% set highlight = highlights_by_verse.get(verse.verse_number) %}
+        <li class="bible-verse{% if highlight %} has-highlight highlight-{{ highlight.color }}{% endif %}" id="verse-{{ verse.verse_number }}" value="{{ verse.verse_number }}">
+          <p class="bible-verse-text"><sup>{{ verse.verse_number }}</sup>{{ verse.text }}</p>
+          {% if verse.notes %}
+            <details class="verse-notes">
+              <summary>
+                {{ verse.notes|length }} {{ "nota" if verse.notes|length == 1 else "notas" }} de rodapé
+              </summary>
+              <ul>
+                {% for note in verse.notes %}
+                  <li>{{ note.note_text }}</li>
+                {% endfor %}
+              </ul>
+            </details>
+          {% endif %}
+          <form class="favorite-action bible-favorite-action" method="post" action="{{ url_for('pages.unfavorite', favorite_id=favorite_id) if favorite_id else url_for('pages.favorite_verse') }}">
+            <input type="hidden" name="csrf_token" value="{{ config['FAVORITES_CSRF_TOKEN'] }}">
+            <input type="hidden" name="next" value="{{ request.full_path }}">
+            {% if not favorite_id %}
+              <input type="hidden" name="translation_code" value="{{ translation.code }}">
+              <input type="hidden" name="book_code" value="{{ book.code }}">
+              <input type="hidden" name="chapter_number" value="{{ verse.chapter_number }}">
+              <input type="hidden" name="verse_number" value="{{ verse.verse_number }}">
+            {% endif %}
+            <button class="favorite-button bible-favorite-button{% if favorite_id %} is-saved{% endif %}" type="submit">
+              <span aria-hidden="true">{% if favorite_id %}♥{% else %}♡{% endif %}</span>
+              {{ "Remover dos favoritos" if favorite_id else "Salvar versículo" }}
+            </button>
+          </form>
+          <a class="verse-card-link" href="{{ url_for('pages.bible_card', translation=translation.code, referencia=book.name_pt ~ ' ' ~ verse.chapter_number ~ ':' ~ verse.verse_number) }}">Criar cartão</a>
+          <details class="personal-verse-tools"{% if annotation or highlight %} open{% endif %}>
+            <summary>Minhas anotações e marcações</summary>
+            <div class="personal-verse-tools-content">
+              <form class="verse-annotation-form" method="post" action="{{ url_for('pages.save_verse_annotation') }}">
+                <input type="hidden" name="csrf_token" value="{{ personal_csrf_token }}">
+                <input type="hidden" name="verse_id" value="{{ verse.verse_id }}">
+                <label for="annotation-{{ verse.verse_number }}">Anotação pessoal</label>
+                <textarea id="annotation-{{ verse.verse_number }}" name="note_text" rows="3" maxlength="5000" placeholder="Registre uma observação sobre este versículo...">{{ annotation.note_text if annotation else "" }}</textarea>
+                <button class="personal-submit-button" type="submit">{{ "Atualizar anotação" if annotation else "Salvar anotação" }}</button>
+              </form>
+              {% if annotation %}
+                <form method="post" action="{{ url_for('pages.remove_verse_annotation', annotation_id=annotation.id) }}" data-confirm="Excluir esta anotação pessoal?">
+                  <input type="hidden" name="csrf_token" value="{{ personal_csrf_token }}">
+                  <button class="personal-delete-button" type="submit">Excluir anotação</button>
+                </form>
+              {% endif %}
+              <form class="verse-highlight-form" method="post" action="{{ url_for('pages.mark_favorite_verse') }}">
+                <input type="hidden" name="csrf_token" value="{{ personal_csrf_token }}">
+                <input type="hidden" name="translation_code" value="{{ translation.code }}">
+                <input type="hidden" name="book_code" value="{{ book.code }}">
+                <input type="hidden" name="chapter_number" value="{{ verse.chapter_number }}">
+                <input type="hidden" name="verse_number" value="{{ verse.verse_number }}">
+                <label for="highlight-color-{{ verse.verse_number }}">Marcação do versículo</label>
+                <div class="personal-inline-fields">
+                  <select id="highlight-color-{{ verse.verse_number }}" name="color" aria-label="Cor da marcação">
+                    {% for code, label in highlight_colors.items() %}
+                      <option value="{{ code }}"{% if highlight and highlight.color == code %} selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                  </select>
+                  <select name="category" aria-label="Categoria da marcação">
+                    {% for code, label in highlight_categories.items() %}
+                      <option value="{{ code }}"{% if highlight and highlight.category == code %} selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                  </select>
+                  <button class="personal-submit-button" type="submit">{{ "Atualizar marcação" if highlight else "Marcar e favoritar" }}</button>
+                </div>
+              </form>
+              {% if highlight %}
+                <form method="post" action="{{ url_for('pages.remove_verse_highlight', favorite_id=highlight.favorite_id) }}">
+                  <input type="hidden" name="csrf_token" value="{{ personal_csrf_token }}">
+                  <button class="personal-delete-button" type="submit">Remover marcação</button>
+                </form>
+              {% endif %}
+            </div>
+          </details>
+        </li>
+      {% endfor %}
+    </ol>
+
+    <div class="bible-chapter-navigation" aria-label="Navegar entre capítulos">
+      {% if previous_destination %}
+        <a class="bible-chapter-nav-link" rel="prev" href="{{ url_for('pages.bible_chapter', translation_code=translation.code, book_code=previous_destination.book_code, chapter_number=previous_destination.chapter_number) }}"><span aria-hidden="true">←</span><span><small>Capítulo anterior</small><strong>{{ previous_destination.book_name }} {{ previous_destination.chapter_number }}</strong></span></a>
+      {% else %}
+        <span class="bible-chapter-nav-spacer"></span>
+      {% endif %}
+      <button class="bible-share-button" type="button" data-share-button data-share-reference="{{ book.name_pt }} {{ verses[0].chapter_number }}" data-share-translation="{{ translation.name }}" data-share-attribution="{{ translation.attribution_text }}">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.7 10.7 6.6-4.4m-6.6 7 6.6 4.4"/></svg>
+        <span>Compartilhar capítulo</span>
+      </button>
+      {% if next_destination %}
+        <a class="bible-chapter-nav-link bible-chapter-nav-next" rel="next" href="{{ url_for('pages.bible_chapter', translation_code=translation.code, book_code=next_destination.book_code, chapter_number=next_destination.chapter_number) }}"><span><small>Próximo capítulo</small><strong>{{ next_destination.book_name }} {{ next_destination.chapter_number }}</strong></span><span aria-hidden="true">→</span></a>
+      {% else %}
+        <span class="bible-chapter-nav-spacer"></span>
+      {% endif %}
+      <p class="share-feedback bible-share-feedback" data-share-feedback aria-live="polite"></p>
+    </div>
+    <p class="translation-credit bible-full-attribution">{{ translation.attribution_text }}</p>
+    <p class="translation-source-links">
+      <a href="{{ translation.license_evidence_url }}" rel="noopener noreferrer">Fonte oficial</a>
+      <span aria-hidden="true">·</span>
+      <a href="{{ translation.license_url }}" rel="noopener noreferrer">{{ translation.license_name }}</a>
+    </p>
+  </section>
+{% endblock %}
