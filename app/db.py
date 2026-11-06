@@ -1,17 +1,144 @@
 from contextlib import closing
 from datetime import date, datetime, timezone
 import atexit
+import logging
 import re
 import sqlite3
+import traceback
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from flask import current_app, g
+import psycopg
 
 
 MIGRATIONS_PATH = Path(__file__).resolve().parent.parent / "migrations"
 POSTGRES_MIGRATIONS_PATH = MIGRATIONS_PATH / "postgresql"
 REQUIRED_SCHEMA_VERSION = 8
+logger = logging.getLogger(__name__)
+
+_SAFE_EXCEPTION_TYPE = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,99}\Z")
+_SAFE_SQLSTATE = re.compile(r"[0-9A-Z]{5}\Z")
+_SAFE_FRAME_NAME = re.compile(r"[A-Za-z0-9_.-]{1,120}\Z")
+_CONNECTION_REPR = re.compile(
+    r"<[^>]*\bConnection\b[^>]*\bat 0x[0-9a-fA-F]+>"
+)
+
+
+def _record_arguments(record):
+    if isinstance(record.args, dict):
+        return record.args.values()
+    if isinstance(record.args, tuple):
+        return record.args
+    return (record.args,) if record.args else ()
+
+
+def _pool_exception(record):
+    for argument in _record_arguments(record):
+        if isinstance(argument, BaseException):
+            return argument
+    if record.exc_info:
+        return record.exc_info[1]
+    return None
+
+
+def _safe_exception_details(error):
+    exception_name = type(error).__name__
+    if not isinstance(exception_name, str) or not _SAFE_EXCEPTION_TYPE.fullmatch(
+        exception_name
+    ):
+        exception_name = "Exception"
+
+    details = [f"exception_type={exception_name}"]
+    try:
+        sqlstate = error.sqlstate
+    except Exception:
+        sqlstate = None
+    if isinstance(sqlstate, str) and _SAFE_SQLSTATE.fullmatch(sqlstate):
+        details.append(f"sqlstate={sqlstate}")
+
+    try:
+        errno = error.errno
+    except Exception:
+        errno = None
+    if type(errno) is int and 0 <= errno <= 65535:
+        details.append(f"errno={errno}")
+    return ", ".join(details)
+
+
+def _safe_frame_value(value):
+    value = Path(value).name
+    return value if _SAFE_FRAME_NAME.fullmatch(value) else "<redacted>"
+
+
+class _SafePsycopgPoolLogFilter(logging.Filter):
+    def filter(self, record):
+        if record.name != "psycopg.pool":
+            return True
+
+        message = record.getMessage()
+        arguments = _record_arguments(record)
+        error = _pool_exception(record)
+        has_connection = any(
+            isinstance(value, psycopg.Connection)
+            or (
+                isinstance(value, str)
+                and _CONNECTION_REPR.search(value) is not None
+            )
+            for value in arguments
+        )
+        has_connection_repr = _CONNECTION_REPR.search(message) is not None
+        is_pool_failure = record.levelno >= logging.WARNING
+
+        if error is not None or has_connection or has_connection_repr or is_pool_failure:
+            details = (
+                _safe_exception_details(error)
+                if error is not None
+                else "exception_type=unavailable"
+            )
+            record.msg = "PostgreSQL pool diagnostic (%s)"
+            record.args = (details,)
+            record.exc_info = None
+            record.exc_text = None
+            record.stack_info = None
+        return True
+
+
+_pool_log_filter = _SafePsycopgPoolLogFilter()
+
+
+def _configure_psycopg_pool_logging():
+    pool_logger = logging.getLogger("psycopg.pool")
+    if _pool_log_filter not in pool_logger.filters:
+        pool_logger.addFilter(_pool_log_filter)
+
+
+def _connect_postgres_connection(connect, conninfo, **kwargs):
+    try:
+        return connect(conninfo, **kwargs)
+    except Exception as error:
+        stack_trace = "\n".join(
+            f'  File "{_safe_frame_value(frame.filename)}", '
+            f"line {frame.lineno}, in {_safe_frame_value(frame.name)}"
+            for frame in traceback.extract_tb(error.__traceback__)
+        )
+        logger.error(
+            "PostgreSQL connection attempt failed "
+            "(%s); sanitized traceback:\n%s",
+            _safe_exception_details(error),
+            stack_trace,
+        )
+        raise
+
+
+class _LoggingPostgresConnection(psycopg.Connection):
+    @classmethod
+    def connect(cls, conninfo="", **kwargs):
+        return _connect_postgres_connection(
+            super().connect,
+            conninfo,
+            **kwargs,
+        )
 
 
 def validate_neon_database_url(database_url, require_pooler):
@@ -392,8 +519,11 @@ def init_app(app):
                 "A dependência psycopg[pool] é necessária para PostgreSQL."
             ) from error
 
+        _configure_psycopg_pool_logging()
         pool = ConnectionPool(
             conninfo=app.config["DATABASE_URL"],
+            connection_class=_LoggingPostgresConnection,
+            name="palavra-do-dia",
             min_size=0,
             max_size=pool_size,
             timeout=pool_timeout,

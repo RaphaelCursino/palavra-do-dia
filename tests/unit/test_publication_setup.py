@@ -6,7 +6,7 @@ from urllib.parse import urlencode
 import pytest
 
 from app import create_app
-from app.db import validate_neon_database_url
+from app.db import _connect_postgres_connection, validate_neon_database_url
 from app.identity import csrf_token_for_visitor
 
 
@@ -210,6 +210,11 @@ def test_postgres_production_startup_opens_lazy_pool_without_migrating(
     assert pools[0].opened is False
     assert pools[0].options["min_size"] == 0
     assert pools[0].options["max_size"] == 3
+    assert (
+        pools[0].options["connection_class"]
+        is database._LoggingPostgresConnection
+    )
+    assert pools[0].options["name"] == "palavra-do-dia"
     assert pools[0].options["kwargs"]["prepare_threshold"] is None
     assert app.extensions["postgres_pool"] is pools[0]
     assert app.config["SESSION_COOKIE_SECURE"] is True
@@ -219,6 +224,217 @@ def test_postgres_production_startup_opens_lazy_pool_without_migrating(
     assert response.status_code == 200
     assert response.json == {"status": "ok"}
     assert pools[0].returned == [pools[0].connection]
+
+
+def test_psycopg_pool_connection_warning_omits_exception_details(caplog):
+    import logging
+
+    from app.db import _configure_psycopg_pool_logging
+
+    secret_url = (
+        "postgresql://runtime:sensitive-password@"
+        "ep-example-pooler.us-east-1.aws.neon.tech/palavra"
+        "?password=another-secret"
+    )
+    pool_logger = logging.getLogger("psycopg.pool")
+    _configure_psycopg_pool_logging()
+    caplog.set_level(logging.WARNING, logger="psycopg.pool")
+
+    pool_logger.warning(
+        "error connecting in %r: %s",
+        "palavra-do-dia",
+        RuntimeError(secret_url),
+    )
+
+    assert "PostgreSQL pool diagnostic" in caplog.text
+    assert "exception_type=RuntimeError" in caplog.text
+    assert "sqlstate=" not in caplog.text
+    assert "errno=" not in caplog.text
+    assert caplog.records[-1].exc_info is None
+    assert secret_url not in caplog.text
+    assert "sensitive-password" not in caplog.text
+    assert "another-secret" not in caplog.text
+
+
+def test_psycopg_pool_logs_validated_sqlstate_and_errno(caplog):
+    import logging
+
+    from app.db import _configure_psycopg_pool_logging
+
+    class SyntheticDatabaseError(RuntimeError):
+        sqlstate = "28P01"
+        errno = 111
+
+    _configure_psycopg_pool_logging()
+    caplog.set_level(logging.WARNING, logger="psycopg.pool")
+    logging.getLogger("psycopg.pool").warning(
+        "error connecting in %r: %s",
+        "safe-pool",
+        SyntheticDatabaseError(
+            "postgresql://test-user:synthetic-password@"
+            "db.example.test/database?options=synthetic-option"
+        ),
+    )
+
+    assert "exception_type=SyntheticDatabaseError" in caplog.text
+    assert "sqlstate=28P01" in caplog.text
+    assert "errno=111" in caplog.text
+    assert "synthetic-password" not in caplog.text
+    assert "synthetic-option" not in caplog.text
+    assert "postgresql://" not in caplog.text
+
+
+def test_psycopg_pool_rejects_unvalidated_error_metadata(caplog):
+    import logging
+
+    from app.db import _configure_psycopg_pool_logging
+
+    class InvalidMetadataError(RuntimeError):
+        sqlstate = "28P01 contains sensitive text"
+        errno = True
+
+    _configure_psycopg_pool_logging()
+    caplog.set_level(logging.WARNING, logger="psycopg.pool")
+    logging.getLogger("psycopg.pool").warning(
+        "error connecting in %r: %s",
+        "safe-pool",
+        InvalidMetadataError("synthetic-secret"),
+    )
+
+    assert "exception_type=InvalidMetadataError" in caplog.text
+    assert "sqlstate=" not in caplog.text
+    assert "errno=" not in caplog.text
+    assert "contains sensitive text" not in caplog.text
+    assert "synthetic-secret" not in caplog.text
+
+
+def test_psycopg_pool_sanitizes_connection_repr(caplog):
+    import logging
+
+    from app.db import _configure_psycopg_pool_logging
+
+    _configure_psycopg_pool_logging()
+    caplog.set_level(logging.WARNING, logger="psycopg.pool")
+    connection_repr = (
+        "<psycopg.Connection user=test-user "
+        "password=synthetic-password at 0x1234>"
+    )
+    logging.getLogger("psycopg.pool").warning(
+        "discarding broken connection: %s",
+        connection_repr,
+    )
+
+    assert "PostgreSQL pool diagnostic" in caplog.text
+    assert connection_repr not in caplog.text
+    assert "synthetic-password" not in caplog.text
+
+
+def test_postgres_connection_failure_logs_traceback_without_credentials(
+    caplog,
+):
+    import logging
+
+    secret_url = (
+        "postgresql://runtime:sensitive-password@"
+        "ep-example-pooler.us-east-1.aws.neon.tech/palavra"
+        "?password=another-secret"
+    )
+
+    caplog.set_level(logging.ERROR, logger="app.db")
+
+    class SyntheticConnectionError(RuntimeError):
+        sqlstate = "08001"
+        errno = 111
+
+    original_error = SyntheticConnectionError(secret_url)
+
+    def failing_connect(_conninfo, **_kwargs):
+        raise original_error
+
+    with pytest.raises(SyntheticConnectionError) as error:
+        _connect_postgres_connection(failing_connect, secret_url)
+    assert error.value is original_error
+
+    assert "PostgreSQL connection attempt failed" in caplog.text
+    assert "exception_type=SyntheticConnectionError" in caplog.text
+    assert "sqlstate=08001" in caplog.text
+    assert "errno=111" in caplog.text
+    assert "failing_connect" in caplog.text
+    assert "sanitized traceback:" in caplog.text
+    assert 'File "test_publication_setup.py"' in caplog.text
+    assert secret_url not in caplog.text
+    assert "sensitive-password" not in caplog.text
+    assert "another-secret" not in caplog.text
+
+
+def test_psycopg_pool_exception_is_sanitized_before_propagated_root_handler(
+    caplog,
+    monkeypatch,
+):
+    import logging
+
+    from app.db import _configure_psycopg_pool_logging
+
+    _configure_psycopg_pool_logging()
+    pool_logger = logging.getLogger("psycopg.pool")
+    monkeypatch.setattr(pool_logger, "propagate", True)
+    caplog.set_level(logging.WARNING, logger="psycopg.pool")
+
+    secret_password = "test-db-password-5e12"
+    secret_parameter = "test-connection-option-9b73"
+    secret_url = (
+        "postgresql://test-user:"
+        + secret_password
+        + "@db.example.test/database?options="
+        + secret_parameter
+    )
+    try:
+        raise RuntimeError(secret_url)
+    except RuntimeError:
+        pool_logger.warning(
+            "error connecting in %r: %s",
+            secret_url,
+            secret_url,
+            exc_info=True,
+        )
+
+    assert len(caplog.records) == 1
+    record = caplog.records[0]
+    assert "PostgreSQL pool diagnostic" in record.getMessage()
+    assert "exception_type=RuntimeError" in record.getMessage()
+    assert "sqlstate=" not in record.getMessage()
+    assert "errno=" not in record.getMessage()
+    assert record.exc_info is None
+    assert secret_url not in caplog.text
+    assert secret_password not in caplog.text
+    assert secret_parameter not in caplog.text
+    assert "postgresql://" not in caplog.text
+
+
+def test_logging_postgres_connection_routes_connect_through_safe_logger(
+    monkeypatch,
+):
+    import app.db as database
+
+    calls = []
+    connection = object()
+
+    def safe_connect(connect, conninfo, **kwargs):
+        calls.append((connect, conninfo, kwargs))
+        return connection
+
+    monkeypatch.setattr(database, "_connect_postgres_connection", safe_connect)
+
+    result = database._LoggingPostgresConnection.connect(
+        "non-secret-conninfo",
+        connect_timeout=7,
+    )
+
+    assert result is connection
+    assert len(calls) == 1
+    assert callable(calls[0][0])
+    assert calls[0][1] == "non-secret-conninfo"
+    assert calls[0][2] == {"connect_timeout": 7}
 
 
 def test_health_check_reports_not_ready_without_bible_content(tmp_path):
