@@ -546,6 +546,7 @@ def init_app(app):
             kwargs={
                 "row_factory": postgres_row_factory,
                 "prepare_threshold": None,
+                "connect_timeout": 5,
             },
             open=False,
         )

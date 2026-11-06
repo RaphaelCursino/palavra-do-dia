@@ -222,6 +222,7 @@ def test_postgres_production_startup_opens_lazy_pool_without_migrating(
     )
     assert pools[0].options["name"] == "palavra-do-dia"
     assert pools[0].options["kwargs"]["prepare_threshold"] is None
+    assert pools[0].options["kwargs"]["connect_timeout"] == 5
     assert app.extensions["postgres_pool"] is pools[0]
     assert app.config["SESSION_COOKIE_SECURE"] is True
     assert app.config["SESSION_COOKIE_HTTPONLY"] is True
