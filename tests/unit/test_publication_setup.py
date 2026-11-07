@@ -454,6 +454,7 @@ def test_postgres_pool_timeout_logs_capacity_without_connection_details(
     import app.db as database
 
     monkeypatch.setattr(database.os, "getpid", lambda: 9876)
+    monkeypatch.setenv("PALAVRA_DO_DIA_PROCESS_ROLE", "worker")
     timeout = PoolTimeout("sensitive connection details")
 
     class FailingPool:
@@ -477,7 +478,10 @@ def test_postgres_pool_timeout_logs_capacity_without_connection_details(
         connect_database()
 
     assert raised.value is timeout
-    assert "PostgreSQL pool checkout started (pid=9876)" in caplog.text
+    assert (
+        "PostgreSQL pool checkout started "
+        "(pid=9876, process_role=worker)"
+    ) in caplog.text
     assert "PostgreSQL pool checkout timed out" in caplog.text
     assert "pid=9876" in caplog.text
     assert "duration_ms=" in caplog.text

@@ -101,6 +101,11 @@ def _pool_stats_details(pool):
     )
 
 
+def get_process_role():
+    role = os.environ.get("PALAVRA_DO_DIA_PROCESS_ROLE")
+    return role if role in {"master", "worker"} else "unknown"
+
+
 class _SafePsycopgPoolLogFilter(logging.Filter):
     def filter(self, record):
         if record.name != "psycopg.pool":
@@ -569,8 +574,9 @@ def connect_database():
         started_at = time.monotonic()
         process_id = os.getpid()
         logger.info(
-            "PostgreSQL pool checkout started (pid=%d)",
+            "PostgreSQL pool checkout started (pid=%d, process_role=%s)",
             process_id,
+            get_process_role(),
         )
         try:
             connection = pool.getconn()
@@ -578,8 +584,9 @@ def connect_database():
             duration_ms = int((time.monotonic() - started_at) * 1000)
             logger.error(
                 "PostgreSQL pool checkout timed out "
-                "(pid=%d, duration_ms=%d, %s, %s)",
+                "(pid=%d, process_role=%s, duration_ms=%d, %s, %s)",
                 process_id,
+                get_process_role(),
                 duration_ms,
                 _safe_exception_details(error),
                 _pool_stats_details(pool),
@@ -589,8 +596,9 @@ def connect_database():
             duration_ms = int((time.monotonic() - started_at) * 1000)
             logger.error(
                 "PostgreSQL pool checkout failed "
-                "(pid=%d, duration_ms=%d, %s)",
+                "(pid=%d, process_role=%s, duration_ms=%d, %s)",
                 process_id,
+                get_process_role(),
                 duration_ms,
                 _safe_exception_details(error),
             )
@@ -600,8 +608,9 @@ def connect_database():
         lease_id = uuid.uuid4().hex
         logger.info(
             "PostgreSQL pool checkout acquired "
-            "(pid=%d, lease_id=%s, duration_ms=%d, %s)",
+            "(pid=%d, process_role=%s, lease_id=%s, duration_ms=%d, %s)",
             process_id,
+            get_process_role(),
             lease_id,
             duration_ms,
             _pool_stats_details(pool),
@@ -637,6 +646,9 @@ def close_db(_error=None):
 
 
 def init_app(app):
+    if "postgres_pool" in app.extensions:
+        return
+
     app.teardown_appcontext(close_db)
 
     if get_database_backend(app.config) == "postgresql":
@@ -646,6 +658,15 @@ def init_app(app):
             raise RuntimeError(
                 "DATABASE_URL só pode ser usada no ambiente de produção ou "
                 "no fluxo de teste PostgreSQL protegido."
+            )
+        if get_process_role() == "master":
+            logger.error(
+                "Refusing PostgreSQL pool initialization in Gunicorn master "
+                "(pid=%d, process_role=master)",
+                os.getpid(),
+            )
+            raise RuntimeError(
+                "O pool PostgreSQL só pode ser inicializado em um worker."
             )
 
         pool_size = app.config["POSTGRES_POOL_MAX_SIZE"]
@@ -690,8 +711,10 @@ def init_app(app):
         pool.open(wait=False)
         app.extensions["postgres_pool"] = pool
         logger.info(
-            "PostgreSQL connection pool initialized (pid=%d, %s)",
+            "PostgreSQL connection pool initialized "
+            "(pid=%d, process_role=%s, %s)",
             os.getpid(),
+            get_process_role(),
             _pool_stats_details(pool),
         )
         atexit.register(pool.close)

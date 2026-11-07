@@ -1,7 +1,8 @@
-from pathlib import Path
+import logging
 import os
 import secrets
 import sqlite3
+from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from flask import Flask, g
@@ -12,6 +13,7 @@ from .config import Config
 from .db import (
     REQUIRED_SCHEMA_VERSION,
     get_db,
+    get_process_role,
     init_app as init_database,
 )
 from .errors import register_error_handlers
@@ -70,6 +72,11 @@ def create_app(test_config=None):
     database_path.parent.mkdir(parents=True, exist_ok=True)
 
     init_database(app)
+    logging.getLogger("app.db").info(
+        "Flask application initialized (pid=%d, process_role=%s)",
+        os.getpid(),
+        get_process_role(),
+    )
     app.register_blueprint(pages)
     register_error_handlers(app)
     register_commands(app)

@@ -5,7 +5,7 @@ services:
     plan: free
     autoDeploy: false
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn --bind 0.0.0.0:$PORT --workers 2 --threads 4 --timeout 120 wsgi:application
+    startCommand: gunicorn --config gunicorn.conf.py --no-preload --bind 0.0.0.0:$PORT --workers 2 --threads 4 --timeout 120 wsgi:application
     healthCheckPath: /healthz
     envVars:
       - key: PYTHON_VERSION
