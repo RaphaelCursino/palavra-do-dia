@@ -1,4 +1,22 @@
+import pytest
+
 from app.services.daily_reading import format_date_pt, local_today
+
+
+def test_home_head_returns_empty_success_without_accessing_database(
+    client, monkeypatch
+):
+    from app.routes import pages
+
+    def fail_if_database_is_accessed():
+        pytest.fail("HEAD / must not access the database.")
+
+    monkeypatch.setattr(pages, "get_db", fail_if_database_is_accessed)
+
+    response = client.head("/")
+
+    assert response.status_code == 200
+    assert response.get_data() == b""
 
 
 def test_home_page_shows_beautiful_empty_reading_without_inventing_scripture(client):

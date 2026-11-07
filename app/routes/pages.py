@@ -217,6 +217,9 @@ def _redirect_with_favorite_status(default_path, status):
 
 @pages.get("/")
 def home():
+    if request.method == "HEAD":
+        return "", 200
+
     today = local_today(current_app.config["DAILY_READING_TIMEZONE"])
     today_iso = today.isoformat()
     connection = get_db()
