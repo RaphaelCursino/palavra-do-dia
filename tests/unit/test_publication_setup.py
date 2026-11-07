@@ -216,6 +216,9 @@ def test_postgres_production_startup_opens_lazy_pool_without_migrating(
     assert pools[0].opened is False
     assert pools[0].options["min_size"] == 0
     assert pools[0].options["max_size"] == 3
+    assert pools[0].options["reconnect_timeout"] == 30
+    assert pools[0].options["reconnect_failed"] is database.reconnect_failed
+    assert pools[0].options["configure"] is database.configure
     assert (
         pools[0].options["connection_class"]
         is database._LoggingPostgresConnection
@@ -231,6 +234,59 @@ def test_postgres_production_startup_opens_lazy_pool_without_migrating(
     assert response.status_code == 200
     assert response.json == {"status": "ok"}
     assert pools[0].returned == [pools[0].connection]
+
+
+def test_reconnect_failed_logs_pool_statistics_without_connection_details(
+    caplog,
+):
+    import logging
+
+    import app.db as database
+
+    class FakePool:
+        def get_stats(self):
+            return {
+                "pool_size": 1,
+                "pool_max": 4,
+                "pool_available": 0,
+                "requests_waiting": 17,
+            }
+
+    caplog.set_level(logging.ERROR, logger="app.db")
+
+    database.reconnect_failed(FakePool())
+
+    assert (
+        "PostgreSQL pool reconnect attempts failed "
+        "(pool_size=1, pool_max=4, pool_available=0, requests_waiting=17)"
+        in caplog.text
+    )
+    assert "postgresql://" not in caplog.text
+    assert "password" not in caplog.text
+
+
+def test_configure_logs_connection_success_without_querying_or_identifying(
+    caplog,
+):
+    import logging
+
+    import app.db as database
+
+    class FakeConnection:
+        def __str__(self):
+            return "FakeConnection(user=private, password=secret)"
+
+        def execute(self, *_args, **_kwargs):
+            pytest.fail("The configure callback must not execute a query.")
+
+    caplog.set_level(logging.INFO, logger="app.db")
+
+    database.configure(FakeConnection())
+
+    assert "PostgreSQL connection established" in caplog.text
+    assert "private" not in caplog.text
+    assert "secret" not in caplog.text
+    assert "postgresql://" not in caplog.text
 
 
 def test_postgres_pool_timeout_logs_capacity_without_connection_details(

@@ -114,6 +114,22 @@ def _configure_psycopg_pool_logging():
         pool_logger.addFilter(_pool_log_filter)
 
 
+def reconnect_failed(pool):
+    stats = pool.get_stats()
+    logger.error(
+        "PostgreSQL pool reconnect attempts failed "
+        "(pool_size=%d, pool_max=%d, pool_available=%d, requests_waiting=%d)",
+        stats["pool_size"],
+        stats["pool_max"],
+        stats["pool_available"],
+        stats["requests_waiting"],
+    )
+
+
+def configure(connection):
+    logger.info("PostgreSQL connection established")
+
+
 def _connect_postgres_connection(connect, conninfo, **kwargs):
     try:
         return connect(conninfo, **kwargs)
@@ -541,6 +557,9 @@ def init_app(app):
             min_size=0,
             max_size=pool_size,
             timeout=pool_timeout,
+            reconnect_timeout=30,
+            reconnect_failed=reconnect_failed,
+            configure=configure,
             max_idle=30,
             max_lifetime=300,
             kwargs={
