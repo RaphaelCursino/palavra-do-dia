@@ -138,6 +138,13 @@ _pool_log_filter = _SafePsycopgPoolLogFilter()
 
 
 def _configure_psycopg_pool_logging():
+    logger.setLevel(logging.INFO)
+    if not logger.hasHandlers():
+        gunicorn_error_logger = logging.getLogger("gunicorn.error")
+        for handler in gunicorn_error_logger.handlers:
+            if handler not in logger.handlers:
+                logger.addHandler(handler)
+
     pool_logger = logging.getLogger("psycopg.pool")
     if _pool_log_filter not in pool_logger.filters:
         pool_logger.addFilter(_pool_log_filter)
