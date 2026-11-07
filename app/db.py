@@ -2,8 +2,10 @@ from contextlib import closing
 from datetime import date, datetime, timezone
 import atexit
 import logging
+import os
 import re
 import sqlite3
+import time
 import traceback
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlsplit
@@ -116,36 +118,61 @@ def _configure_psycopg_pool_logging():
 
 def reconnect_failed(pool):
     stats = pool.get_stats()
+    details = [
+        f"pool_size={stats['pool_size']}",
+        f"pool_max={stats['pool_max']}",
+        f"pool_available={stats['pool_available']}",
+        f"requests_waiting={stats['requests_waiting']}",
+    ]
+    for key in ("connections_num", "connections_errors", "connections_ms"):
+        value = stats.get(key)
+        if type(value) is int and value >= 0:
+            details.append(f"{key}={value}")
+
     logger.error(
-        "PostgreSQL pool reconnect attempts failed "
-        "(pool_size=%d, pool_max=%d, pool_available=%d, requests_waiting=%d)",
-        stats["pool_size"],
-        stats["pool_max"],
-        stats["pool_available"],
-        stats["requests_waiting"],
+        "PostgreSQL pool reconnect attempts failed (%s)",
+        ", ".join(details),
     )
 
 
-def configure(connection):
-    logger.info("PostgreSQL connection established")
+def configure(_connection):
+    return None
 
 
 def _connect_postgres_connection(connect, conninfo, **kwargs):
+    started_at = time.monotonic()
+    process_id = os.getpid()
+    logger.info(
+        "PostgreSQL physical connection attempt started (pid=%d)",
+        process_id,
+    )
     try:
-        return connect(conninfo, **kwargs)
+        connection = connect(conninfo, **kwargs)
     except Exception as error:
+        duration_ms = int((time.monotonic() - started_at) * 1000)
         stack_trace = "\n".join(
             f'  File "{_safe_frame_value(frame.filename)}", '
             f"line {frame.lineno}, in {_safe_frame_value(frame.name)}"
             for frame in traceback.extract_tb(error.__traceback__)
         )
         logger.error(
-            "PostgreSQL connection attempt failed "
-            "(%s); sanitized traceback:\n%s",
+            "PostgreSQL physical connection attempt failed "
+            "(pid=%d, duration_ms=%d, %s); sanitized traceback:\n%s",
+            process_id,
+            duration_ms,
             _safe_exception_details(error),
             stack_trace,
         )
         raise
+
+    duration_ms = int((time.monotonic() - started_at) * 1000)
+    logger.info(
+        "PostgreSQL physical connection established "
+        "(pid=%d, duration_ms=%d)",
+        process_id,
+        duration_ms,
+    )
+    return connection
 
 
 class _LoggingPostgresConnection(psycopg.Connection):

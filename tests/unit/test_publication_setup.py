@@ -265,7 +265,34 @@ def test_reconnect_failed_logs_pool_statistics_without_connection_details(
     assert "password" not in caplog.text
 
 
-def test_configure_logs_connection_success_without_querying_or_identifying(
+def test_reconnect_failed_logs_available_connection_counters(caplog):
+    import logging
+
+    import app.db as database
+
+    class FakePool:
+        def get_stats(self):
+            return {
+                "pool_size": 1,
+                "pool_max": 4,
+                "pool_available": 0,
+                "requests_waiting": 17,
+                "connections_num": 6,
+                "connections_errors": 2,
+                "connections_ms": 823,
+            }
+
+    caplog.set_level(logging.ERROR, logger="app.db")
+
+    database.reconnect_failed(FakePool())
+
+    assert "connections_num=6" in caplog.text
+    assert "connections_errors=2" in caplog.text
+    assert "connections_ms=823" in caplog.text
+    assert "postgresql://" not in caplog.text
+
+
+def test_configure_remains_silent_to_avoid_duplicate_connection_log(
     caplog,
 ):
     import logging
@@ -283,7 +310,7 @@ def test_configure_logs_connection_success_without_querying_or_identifying(
 
     database.configure(FakeConnection())
 
-    assert "PostgreSQL connection established" in caplog.text
+    assert caplog.text == ""
     assert "private" not in caplog.text
     assert "secret" not in caplog.text
     assert "postgresql://" not in caplog.text
@@ -450,9 +477,11 @@ def test_psycopg_pool_sanitizes_connection_repr(caplog):
 
 
 def test_postgres_connection_failure_logs_traceback_without_credentials(
-    caplog,
+    caplog, monkeypatch
 ):
     import logging
+
+    import app.db as database
 
     secret_url = (
         "postgresql://runtime:sensitive-password@"
@@ -460,7 +489,14 @@ def test_postgres_connection_failure_logs_traceback_without_credentials(
         "?password=another-secret"
     )
 
-    caplog.set_level(logging.ERROR, logger="app.db")
+    timestamps = iter((12.0, 14.125))
+    monkeypatch.setattr(
+        database,
+        "time",
+        SimpleNamespace(monotonic=lambda: next(timestamps)),
+    )
+    monkeypatch.setattr(database, "os", SimpleNamespace(getpid=lambda: 4321))
+    caplog.set_level(logging.INFO, logger="app.db")
 
     class SyntheticConnectionError(RuntimeError):
         sqlstate = "08001"
@@ -475,16 +511,52 @@ def test_postgres_connection_failure_logs_traceback_without_credentials(
         _connect_postgres_connection(failing_connect, secret_url)
     assert error.value is original_error
 
-    assert "PostgreSQL connection attempt failed" in caplog.text
+    assert "PostgreSQL physical connection attempt failed" in caplog.text
     assert "exception_type=SyntheticConnectionError" in caplog.text
     assert "sqlstate=08001" in caplog.text
     assert "errno=111" in caplog.text
     assert "failing_connect" in caplog.text
     assert "sanitized traceback:" in caplog.text
     assert 'File "test_publication_setup.py"' in caplog.text
+    assert "attempt started (pid=4321)" in caplog.text
+    assert "attempt failed (pid=4321, duration_ms=2125," in caplog.text
     assert secret_url not in caplog.text
     assert "sensitive-password" not in caplog.text
     assert "another-secret" not in caplog.text
+
+
+def test_postgres_connection_success_logs_duration_and_pid_safely(
+    caplog, monkeypatch
+):
+    import logging
+
+    import app.db as database
+
+    secret_url = "postgresql://sensitive-user:secret@private-host/db?secret=value"
+    timestamps = iter((20.0, 20.375))
+    monkeypatch.setattr(
+        database,
+        "time",
+        SimpleNamespace(monotonic=lambda: next(timestamps)),
+    )
+    monkeypatch.setattr(database, "os", SimpleNamespace(getpid=lambda: 9876))
+    caplog.set_level(logging.INFO, logger="app.db")
+
+    expected_connection = object()
+
+    def connect(conninfo, **_kwargs):
+        assert conninfo == secret_url
+        return expected_connection
+
+    connection = _connect_postgres_connection(connect, secret_url)
+
+    assert connection is expected_connection
+    assert "attempt started (pid=9876)" in caplog.text
+    assert "connection established (pid=9876, duration_ms=375)" in caplog.text
+    assert secret_url not in caplog.text
+    assert "sensitive-user" not in caplog.text
+    assert "private-host" not in caplog.text
+    assert "secret=value" not in caplog.text
 
 
 def test_psycopg_pool_exception_is_sanitized_before_propagated_root_handler(
