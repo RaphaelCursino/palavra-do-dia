@@ -7,6 +7,7 @@ import re
 import sqlite3
 import time
 import traceback
+import uuid
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlsplit
 
@@ -25,6 +26,15 @@ _SAFE_SQLSTATE = re.compile(r"[0-9A-Z]{5}\Z")
 _SAFE_FRAME_NAME = re.compile(r"[A-Za-z0-9_.-]{1,120}\Z")
 _CONNECTION_REPR = re.compile(
     r"<[^>]*\bConnection\b[^>]*\bat 0x[0-9a-fA-F]+>"
+)
+_POOL_STAT_KEYS = (
+    "pool_size",
+    "pool_max",
+    "pool_available",
+    "requests_waiting",
+    "connections_num",
+    "connections_errors",
+    "connections_ms",
 )
 
 
@@ -74,6 +84,23 @@ def _safe_frame_value(value):
     return value if _SAFE_FRAME_NAME.fullmatch(value) else "<redacted>"
 
 
+def _pool_stats_details(pool):
+    try:
+        stats = pool.get_stats()
+    except Exception as error:
+        logger.warning(
+            "PostgreSQL pool statistics unavailable (%s)",
+            _safe_exception_details(error),
+        )
+        return "pool_stats=unavailable"
+
+    return ", ".join(
+        f"{key}={value}"
+        for key in _POOL_STAT_KEYS
+        if type(value := stats.get(key)) is int and value >= 0
+    )
+
+
 class _SafePsycopgPoolLogFilter(logging.Filter):
     def filter(self, record):
         if record.name != "psycopg.pool":
@@ -117,21 +144,10 @@ def _configure_psycopg_pool_logging():
 
 
 def reconnect_failed(pool):
-    stats = pool.get_stats()
-    details = [
-        f"pool_size={stats['pool_size']}",
-        f"pool_max={stats['pool_max']}",
-        f"pool_available={stats['pool_available']}",
-        f"requests_waiting={stats['requests_waiting']}",
-    ]
-    for key in ("connections_num", "connections_errors", "connections_ms"):
-        value = stats.get(key)
-        if type(value) is int and value >= 0:
-            details.append(f"{key}={value}")
-
     logger.error(
-        "PostgreSQL pool reconnect attempts failed (%s)",
-        ", ".join(details),
+        "PostgreSQL pool reconnect attempts failed (pid=%d, %s)",
+        os.getpid(),
+        _pool_stats_details(pool),
     )
 
 
@@ -173,6 +189,40 @@ def _connect_postgres_connection(connect, conninfo, **kwargs):
         duration_ms,
     )
     return connection
+
+
+def _return_postgres_connection(pool, connection, lease_id):
+    started_at = time.monotonic()
+    process_id = os.getpid()
+    logger.info(
+        "PostgreSQL pool return started "
+        "(pid=%d, lease_id=%s)",
+        process_id,
+        lease_id,
+    )
+    try:
+        pool.putconn(connection)
+    except Exception as error:
+        duration_ms = int((time.monotonic() - started_at) * 1000)
+        logger.error(
+            "PostgreSQL pool return failed "
+            "(pid=%d, lease_id=%s, duration_ms=%d, %s)",
+            process_id,
+            lease_id,
+            duration_ms,
+            _safe_exception_details(error),
+        )
+        raise
+
+    duration_ms = int((time.monotonic() - started_at) * 1000)
+    logger.info(
+        "PostgreSQL pool connection returned "
+        "(pid=%d, lease_id=%s, duration_ms=%d, %s)",
+        process_id,
+        lease_id,
+        duration_ms,
+        _pool_stats_details(pool),
+    )
 
 
 class _LoggingPostgresConnection(psycopg.Connection):
@@ -509,20 +559,54 @@ def connect_database():
             raise RuntimeError(
                 "O pool PostgreSQL não foi inicializado para este processo."
             )
+        started_at = time.monotonic()
+        process_id = os.getpid()
+        logger.info(
+            "PostgreSQL pool checkout started (pid=%d)",
+            process_id,
+        )
         try:
             connection = pool.getconn()
-        except PoolTimeout:
-            stats = pool.get_stats()
+        except PoolTimeout as error:
+            duration_ms = int((time.monotonic() - started_at) * 1000)
             logger.error(
-                "PostgreSQL connection pool timed out "
-                "(pool_size=%d, max_size=%d, available=%d, waiting=%d)",
-                stats["pool_size"],
-                stats["pool_max"],
-                stats["pool_available"],
-                stats["requests_waiting"],
+                "PostgreSQL pool checkout timed out "
+                "(pid=%d, duration_ms=%d, %s, %s)",
+                process_id,
+                duration_ms,
+                _safe_exception_details(error),
+                _pool_stats_details(pool),
             )
             raise
-        return PostgresConnection(connection, release=pool.putconn)
+        except Exception as error:
+            duration_ms = int((time.monotonic() - started_at) * 1000)
+            logger.error(
+                "PostgreSQL pool checkout failed "
+                "(pid=%d, duration_ms=%d, %s)",
+                process_id,
+                duration_ms,
+                _safe_exception_details(error),
+            )
+            raise
+
+        duration_ms = int((time.monotonic() - started_at) * 1000)
+        lease_id = uuid.uuid4().hex
+        logger.info(
+            "PostgreSQL pool checkout acquired "
+            "(pid=%d, lease_id=%s, duration_ms=%d, %s)",
+            process_id,
+            lease_id,
+            duration_ms,
+            _pool_stats_details(pool),
+        )
+        return PostgresConnection(
+            connection,
+            release=lambda leased_connection: _return_postgres_connection(
+                pool,
+                leased_connection,
+                lease_id,
+            ),
+        )
 
     connection = sqlite3.connect(
         current_app.config["DATABASE_PATH"],
@@ -598,6 +682,11 @@ def init_app(app):
         )
         pool.open(wait=False)
         app.extensions["postgres_pool"] = pool
+        logger.info(
+            "PostgreSQL connection pool initialized (pid=%d, %s)",
+            os.getpid(),
+            _pool_stats_details(pool),
+        )
         atexit.register(pool.close)
         return
 

@@ -176,6 +176,14 @@ def test_postgres_production_startup_opens_lazy_pool_without_migrating(
             self.returned = []
             pools.append(self)
 
+        def get_stats(self):
+            return {
+                "pool_size": 0,
+                "pool_max": self.options["max_size"],
+                "pool_available": 0,
+                "requests_waiting": 0,
+            }
+
         def open(self, wait):
             self.opened = wait
 
@@ -237,11 +245,13 @@ def test_postgres_production_startup_opens_lazy_pool_without_migrating(
 
 
 def test_reconnect_failed_logs_pool_statistics_without_connection_details(
-    caplog,
+    caplog, monkeypatch
 ):
     import logging
 
     import app.db as database
+
+    monkeypatch.setattr(database.os, "getpid", lambda: 3456)
 
     class FakePool:
         def get_stats(self):
@@ -258,7 +268,8 @@ def test_reconnect_failed_logs_pool_statistics_without_connection_details(
 
     assert (
         "PostgreSQL pool reconnect attempts failed "
-        "(pool_size=1, pool_max=4, pool_available=0, requests_waiting=17)"
+        "(pid=3456, pool_size=1, pool_max=4, pool_available=0, "
+        "requests_waiting=17)"
         in caplog.text
     )
     assert "postgresql://" not in caplog.text
@@ -316,11 +327,133 @@ def test_configure_remains_silent_to_avoid_duplicate_connection_log(
     assert "postgresql://" not in caplog.text
 
 
-def test_postgres_pool_timeout_logs_capacity_without_connection_details(
-    caplog,
+def test_app_db_info_logs_are_enabled_by_gunicorn_info_root(caplog):
+    import logging
+
+    app_logger = logging.getLogger("app")
+    db_logger = logging.getLogger("app.db")
+    original_app_level = app_logger.level
+    app_logger.setLevel(logging.NOTSET)
+    caplog.set_level(logging.INFO)
+    try:
+        assert db_logger.getEffectiveLevel() == logging.INFO
+        assert db_logger.propagate
+        db_logger.info("INFO-level observability test")
+        assert "INFO-level observability test" in caplog.text
+    finally:
+        app_logger.setLevel(original_app_level)
+
+
+def test_postgres_checkout_and_return_logs_are_correlated_and_safe(
+    caplog, monkeypatch
+):
+    import logging
+    import app.db as database
+
+    monkeypatch.setattr(database.os, "getpid", lambda: 7654)
+    connection = object()
+
+    class FakePool:
+        def __init__(self):
+            self.returned = []
+
+        def getconn(self):
+            return connection
+
+        def putconn(self, leased_connection):
+            self.returned.append(leased_connection)
+
+        def get_stats(self):
+            return {
+                "pool_size": 1,
+                "pool_max": 4,
+                "pool_available": 0 if not self.returned else 1,
+                "requests_waiting": 0,
+                "connections_num": 1,
+                "connections_errors": 0,
+                "connections_ms": 23,
+            }
+
+    pool = FakePool()
+    app = Flask(__name__)
+    app.config["DATABASE_URL"] = RUNTIME_URL
+    app.extensions["postgres_pool"] = pool
+    caplog.set_level(logging.INFO, logger="app.db")
+
+    with app.app_context():
+        wrapper = connect_database()
+        wrapper.close()
+
+    assert pool.returned == [connection]
+    assert "pid=7654" in caplog.text
+    assert "PostgreSQL pool checkout started" in caplog.text
+    assert "PostgreSQL pool checkout acquired" in caplog.text
+    assert "PostgreSQL pool return started" in caplog.text
+    assert "PostgreSQL pool connection returned" in caplog.text
+    lease_ids = re.findall(r"lease_id=([0-9a-f]{32})", caplog.text)
+    assert len(lease_ids) == 3
+    assert len(set(lease_ids)) == 1
+    assert "ep-example" not in caplog.text
+    assert "runtime" not in caplog.text
+    assert "postgresql://" not in caplog.text
+
+
+def test_postgres_pool_return_failure_is_logged_safely_and_propagated(
+    caplog, monkeypatch
 ):
     import logging
 
+    import app.db as database
+
+    monkeypatch.setattr(database.os, "getpid", lambda: 8765)
+    connection = object()
+    return_error = RuntimeError(
+        "postgresql://user:secret@private-host/db?token=private"
+    )
+
+    class FakePool:
+        def getconn(self):
+            return connection
+
+        def putconn(self, _connection):
+            raise return_error
+
+        def get_stats(self):
+            return {
+                "pool_size": 1,
+                "pool_max": 4,
+                "pool_available": 0,
+                "requests_waiting": 0,
+            }
+
+    app = Flask(__name__)
+    app.config["DATABASE_URL"] = RUNTIME_URL
+    app.extensions["postgres_pool"] = FakePool()
+    caplog.set_level(logging.INFO, logger="app.db")
+
+    with app.app_context():
+        wrapper = connect_database()
+        with pytest.raises(RuntimeError) as raised:
+            wrapper.close()
+
+    assert raised.value is return_error
+    assert "PostgreSQL pool return failed" in caplog.text
+    assert "pid=8765" in caplog.text
+    assert "exception_type=RuntimeError" in caplog.text
+    assert "private-host" not in caplog.text
+    assert "token=private" not in caplog.text
+    assert "secret" not in caplog.text
+
+
+def test_postgres_pool_timeout_logs_capacity_without_connection_details(
+    caplog,
+    monkeypatch,
+):
+    import logging
+
+    import app.db as database
+
+    monkeypatch.setattr(database.os, "getpid", lambda: 9876)
     timeout = PoolTimeout("sensitive connection details")
 
     class FailingPool:
@@ -338,14 +471,18 @@ def test_postgres_pool_timeout_logs_capacity_without_connection_details(
     app = Flask(__name__)
     app.config["DATABASE_URL"] = RUNTIME_URL
     app.extensions["postgres_pool"] = FailingPool()
-    caplog.set_level(logging.ERROR, logger="app.db")
+    caplog.set_level(logging.INFO, logger="app.db")
 
     with app.app_context(), pytest.raises(PoolTimeout) as raised:
         connect_database()
 
     assert raised.value is timeout
+    assert "PostgreSQL pool checkout started (pid=9876)" in caplog.text
+    assert "PostgreSQL pool checkout timed out" in caplog.text
+    assert "pid=9876" in caplog.text
+    assert "duration_ms=" in caplog.text
     assert (
-        "pool_size=4, max_size=4, available=0, waiting=2"
+        "pool_size=4, pool_max=4, pool_available=0, requests_waiting=2"
         in caplog.text
     )
     assert "sensitive connection details" not in caplog.text
